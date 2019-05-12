@@ -1,0 +1,8 @@
+language: rust
+before_script:
+    - rustup toolchain install nightly
+    - rustup component add --toolchain nightly rustfmt-preview || cargo +nightly install --force rustfmt-nightly
+script:
+    - cargo +nightly fmt --all -- --check
+    - cargo test --all
+    - cargo run --example=rust_lang_tester
