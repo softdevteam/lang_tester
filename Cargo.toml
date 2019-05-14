@@ -1,0 +1,16 @@
+[package]
+name = "lang_tester"
+version = "0.1.0"
+authors = ["Laurence Tratt <laurie@tratt.net>"]
+edition = "2018"
+
+[[example]]
+name = "rust_lang_tester"
+path = "examples/rust_lang_tester/tester.rs"
+
+[dependencies]
+termcolor = "1.0"
+walkdir = "2"
+
+[dev-dependencies]
+tempdir = "0.3"
