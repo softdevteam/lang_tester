@@ -119,31 +119,31 @@ fn key_multiline_val<'a>(
     let (key, first_line_val) = key_val(lines, line_off, indent);
     line_off += 1;
     let mut val = vec![first_line_val];
-    let sub_indent = indent_level(lines, line_off);
-    while line_off < lines.len() {
-        let cur_indent = indent_level(lines, line_off);
-        if cur_indent == lines[line_off].len() {
-            val.push("");
+    if line_off < lines.len() {
+        let sub_indent = indent_level(lines, line_off);
+        while line_off < lines.len() {
+            let cur_indent = indent_level(lines, line_off);
+            if cur_indent == lines[line_off].len() {
+                val.push("");
+                line_off += 1;
+                continue;
+            }
+            if cur_indent <= indent {
+                break;
+            }
+            val.push(&lines[line_off][sub_indent..].trim());
             line_off += 1;
-            continue;
-        }
-        if cur_indent <= indent {
-            break;
-        }
-        val.push(&lines[line_off][sub_indent..].trim());
-        line_off += 1;
-    }
-    while !val.is_empty() {
-        if !val[val.len() - 1].is_empty() {
-            break;
-        }
-        val.pop().unwrap();
-    }
-    while !val.is_empty() {
-        if val[0].is_empty() {
-            val.remove(0);
         }
     }
+    // Remove trailing empty strings
+    val.drain(
+        val.iter()
+            .rposition(|x| !x.is_empty())
+            .map(|x| x + 1)
+            .unwrap_or(val.len())..,
+    );
+    // Remove leading empty strings
+    val.drain(0..val.iter().position(|x| !x.is_empty()).unwrap_or(0));
     if val.is_empty() {
         panic!("Key without value at line {}", orig_line_off);
     }

@@ -26,14 +26,8 @@ pub(crate) fn match_vec(plines: &Vec<&str>, s: &str) -> bool {
             if plines[pi] == WILDCARD {
                 panic!("Can't have '{}' on two consecutive lines.", WILDCARD);
             }
-            while si < slines.len() {
-                if match_line(plines[pi], slines[si]) {
-                    break;
-                }
+            while si < slines.len() && !match_line(plines[pi], slines[si]) {
                 si += 1;
-            }
-            if si == slines.len() {
-                return false;
             }
         } else if match_line(plines[pi], slines[si]) {
             pi += 1;
@@ -42,13 +36,25 @@ pub(crate) fn match_vec(plines: &Vec<&str>, s: &str) -> bool {
             return false;
         }
     }
-    true
+    (pi == plines.len() && si == slines.len())
+        || (pi + 1 == plines.len() && plines[pi] == WILDCARD && si == slines.len())
 }
 
 /// Does the line `s` match the pattern `p`? Note that both strings are expected to be trimed
 /// before being passed to this function.
 fn match_line(p: &str, s: &str) -> bool {
-    (p.starts_with(WILDCARD) && s.ends_with(&p[WILDCARD.len()..])) || p == s
+    let sww = p.starts_with(WILDCARD);
+    let eww = p.ends_with(WILDCARD);
+    if sww && eww {
+        s.find(&p[WILDCARD.len()..p.len() - WILDCARD.len()])
+            .is_some()
+    } else if sww {
+        s.ends_with(&p[WILDCARD.len()..])
+    } else if eww {
+        s.starts_with(&p[..p.len() - WILDCARD.len()])
+    } else {
+        p == s
+    }
 }
 
 #[cfg(test)]
@@ -71,5 +77,14 @@ mod tests {
         assert!(!match_vec_helper("a\n...\nd", "a\nb\nc"));
         assert!(match_vec_helper("a\n...\nc\n...\ne", "a\nb\nc\nd\ne"));
         assert!(match_vec_helper("a\n...\n...b", "a\nb"));
+        assert!(match_vec_helper("a\n...\nb...", "a\nb"));
+        assert!(match_vec_helper("a\n...\nb...", "a\nbc"));
+        assert!(match_vec_helper("a\nb...", "a\nbc"));
+        assert!(!match_vec_helper("a\nb...", "a\nb\nc"));
+        assert!(match_vec_helper("a\n...b...", "a\nb"));
+        assert!(match_vec_helper("a\n...b...", "a\nxbz"));
+        assert!(match_vec_helper("a\n...b...", "a\nbz"));
+        assert!(match_vec_helper("a\n...b...", "a\nxb"));
+        assert!(!match_vec_helper("a\n...b...", "a\nxb\nc"));
     }
 }
