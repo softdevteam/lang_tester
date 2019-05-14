@@ -27,7 +27,7 @@ pub(crate) fn match_vec(plines: &Vec<&str>, s: &str) -> bool {
                 panic!("Can't have '{}' on two consecutive lines.", WILDCARD);
             }
             while si < slines.len() {
-                if plines[pi] == slines[si] {
+                if match_line(plines[pi], slines[si]) {
                     break;
                 }
                 si += 1;
@@ -35,10 +35,7 @@ pub(crate) fn match_vec(plines: &Vec<&str>, s: &str) -> bool {
             if si == slines.len() {
                 return false;
             }
-        } else if (plines[pi].starts_with(WILDCARD)
-            && slines[si].ends_with(plines[pi][WILDCARD.len()..].trim()))
-            || plines[pi] == slines[si]
-        {
+        } else if match_line(plines[pi], slines[si]) {
             pi += 1;
             si += 1;
         } else {
@@ -46,6 +43,10 @@ pub(crate) fn match_vec(plines: &Vec<&str>, s: &str) -> bool {
         }
     }
     true
+}
+
+fn match_line(p: &str, s: &str) -> bool {
+    (p.starts_with(WILDCARD) && s.ends_with(&p[WILDCARD.len()..])) || p == s
 }
 
 #[cfg(test)]
@@ -69,5 +70,6 @@ mod tests {
         assert!(match_vec_helper("a\n...\nd", "a\nb\nc\nd"));
         assert!(!match_vec_helper("a\n...\nd", "a\nb\nc"));
         assert!(match_vec_helper("a\n...\nc\n...\ne", "a\nb\nc\nd\ne"));
+        assert!(match_vec_helper("a\n...\n...b", "a\nb"));
     }
 }
