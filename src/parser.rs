@@ -105,25 +105,20 @@ fn key_val<'a>(lines: &Vec<&'a str>, line_off: usize, indent: usize) -> (&'a str
         .chars()
         .take_while(|c| c.is_whitespace())
         .count();
-    (key, &line[content_start..])
+    (key, &line[content_start..].trim())
 }
 
 /// Turn one more lines of the format `key: val` (where `val` may spread over many lines) into its
-/// separate components.
+/// separate components. Guarantees to trim leading and trailing newlines.
 fn key_multiline_val<'a>(
     lines: &Vec<&'a str>,
     mut line_off: usize,
     indent: usize,
 ) -> (usize, &'a str, Vec<&'a str>) {
+    let orig_line_off = line_off;
     let (key, first_line_val) = key_val(lines, line_off, indent);
     line_off += 1;
-    if line_off == lines.len() {
-        return (line_off, key, vec![first_line_val.trim()]);
-    }
-    let mut val = Vec::new();
-    if !first_line_val.is_empty() {
-        val.push(first_line_val.trim());
-    }
+    let mut val = vec![first_line_val];
     let sub_indent = indent_level(lines, line_off);
     while line_off < lines.len() {
         let cur_indent = indent_level(lines, line_off);
@@ -143,6 +138,14 @@ fn key_multiline_val<'a>(
             break;
         }
         val.pop().unwrap();
+    }
+    while !val.is_empty() {
+        if val[0].is_empty() {
+            val.remove(0);
+        }
+    }
+    if val.is_empty() {
+        panic!("Key without value at line {}", orig_line_off);
     }
     (line_off, key, val)
 }

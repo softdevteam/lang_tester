@@ -185,7 +185,7 @@ impl<'a> LangTester<'a> {
                 read_to_string(p.as_path()).expect(&format!("Couldn't read {}", test_name));
             let test_str = self.test_extract.as_ref().unwrap()(&all_str)
                 .expect(&format!("Couldn't extract test string from {}", test_name));
-            if test_str.trim().is_empty() {
+            if test_str.is_empty() {
                 write_with_colour("ignored", Color::Yellow);
                 eprint!(" (test string is empty)");
                 num_ignored += 1;

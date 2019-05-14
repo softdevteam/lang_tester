@@ -45,6 +45,8 @@ pub(crate) fn match_vec(plines: &Vec<&str>, s: &str) -> bool {
     true
 }
 
+/// Does the line `s` match the pattern `p`? Note that both strings are expected to be trimed
+/// before being passed to this function.
 fn match_line(p: &str, s: &str) -> bool {
     (p.starts_with(WILDCARD) && s.ends_with(&p[WILDCARD.len()..])) || p == s
 }
@@ -59,10 +61,8 @@ mod tests {
             match_vec(&p.lines().collect::<Vec<_>>(), s)
         }
         assert!(match_vec_helper("", ""));
-        assert!(match_vec_helper("", "\n"));
-        assert!(match_vec_helper("\n", "\n"));
         assert!(match_vec_helper("a", "a"));
-        assert!(match_vec_helper("a", "a"));
+        assert!(!match_vec_helper("a", "ab"));
         assert!(match_vec_helper("...\na", "a"));
         assert!(match_vec_helper("...\na\n...", "a"));
         assert!(match_vec_helper("a\n...", "a"));
