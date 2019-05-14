@@ -18,9 +18,7 @@ use std::{
 use termcolor::{Color, ColorChoice, ColorSpec, StandardStream, WriteColor};
 use walkdir::WalkDir;
 
-use crate::parser::parse_tests;
-
-const WILDCARD: &'static str = "...";
+use crate::{fuzzy, parser::parse_tests};
 
 pub struct LangTester<'a> {
     test_dir: Option<&'a str>,
@@ -228,13 +226,13 @@ impl<'a> LangTester<'a> {
                 }
                 if let Some(ref stderr) = test.stderr {
                     let stderr_utf8 = String::from_utf8(output.stderr).unwrap();
-                    if !fuzzy_match(stderr, &stderr_utf8) {
+                    if !fuzzy::match_vec(stderr, &stderr_utf8) {
                         failure.stderr = Some(stderr_utf8);
                     }
                 }
                 if let Some(ref stdout) = test.stdout {
                     let stdout_utf8 = String::from_utf8(output.stdout).unwrap();
-                    if !fuzzy_match(stdout, &stdout_utf8) {
+                    if !fuzzy::match_vec(stdout, &stdout_utf8) {
                         failure.stdout = Some(stdout_utf8);
                     }
                 }
@@ -352,67 +350,4 @@ fn output_failed() {
 
 fn output_ok() {
     write_with_colour("ok", Color::Green);
-}
-
-/// Does `s` conform to the fuzzy pattern `pattern`? Note that `plines` is expected not to start or
-/// end with blank lines, and each line is expected to be `trim`ed.
-fn fuzzy_match(plines: &Vec<&str>, s: &str) -> bool {
-    let slines = s.trim().lines().map(|x| x.trim()).collect::<Vec<_>>();
-
-    let mut pi = 0;
-    let mut si = 0;
-
-    while pi < plines.len() && si < slines.len() {
-        if plines[pi] == WILDCARD {
-            pi += 1;
-            if pi == plines.len() {
-                return true;
-            }
-            if plines[pi] == WILDCARD {
-                panic!("Can't have '{}' on two consecutive lines.", WILDCARD);
-            }
-            while si < slines.len() {
-                if plines[pi] == slines[si] {
-                    break;
-                }
-                si += 1;
-            }
-            if si == slines.len() {
-                return false;
-            }
-        } else if (plines[pi].starts_with(WILDCARD)
-            && slines[si].ends_with(plines[pi][WILDCARD.len()..].trim()))
-            || plines[pi] == slines[si]
-        {
-            pi += 1;
-            si += 1;
-        } else {
-            return false;
-        }
-    }
-    true
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_fuzzy_match() {
-        fn fuzzy_match_helper(p: &str, s: &str) -> bool {
-            fuzzy_match(&p.lines().collect::<Vec<_>>(), s)
-        }
-        assert!(fuzzy_match_helper("", ""));
-        assert!(fuzzy_match_helper("", "\n"));
-        assert!(fuzzy_match_helper("\n", "\n"));
-        assert!(fuzzy_match_helper("a", "a"));
-        assert!(fuzzy_match_helper("a", "a"));
-        assert!(fuzzy_match_helper("...\na", "a"));
-        assert!(fuzzy_match_helper("...\na\n...", "a"));
-        assert!(fuzzy_match_helper("a\n...", "a"));
-        assert!(fuzzy_match_helper("a\n...\nd", "a\nd"));
-        assert!(fuzzy_match_helper("a\n...\nd", "a\nb\nc\nd"));
-        assert!(!fuzzy_match_helper("a\n...\nd", "a\nb\nc"));
-        assert!(fuzzy_match_helper("a\n...\nc\n...\ne", "a\nb\nc\nd\ne"));
-    }
 }

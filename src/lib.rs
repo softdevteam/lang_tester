@@ -100,6 +100,7 @@
 //! `...` as a simple wildcard: if a line consists solely of `...`, it means either "match zero or
 //! more lines"; if a line begins with `...`, it means "match the remainder of the line only".
 
+mod fuzzy;
 mod parser;
 mod tester;
 
