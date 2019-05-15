@@ -105,44 +105,47 @@ fn key_val<'a>(lines: &Vec<&'a str>, line_off: usize, indent: usize) -> (&'a str
         .chars()
         .take_while(|c| c.is_whitespace())
         .count();
-    (key, &line[content_start..])
+    (key, &line[content_start..].trim())
 }
 
 /// Turn one more lines of the format `key: val` (where `val` may spread over many lines) into its
-/// separate components.
+/// separate components. Guarantees to trim leading and trailing newlines.
 fn key_multiline_val<'a>(
     lines: &Vec<&'a str>,
     mut line_off: usize,
     indent: usize,
 ) -> (usize, &'a str, Vec<&'a str>) {
+    let orig_line_off = line_off;
     let (key, first_line_val) = key_val(lines, line_off, indent);
     line_off += 1;
-    if line_off == lines.len() {
-        return (line_off, key, vec![first_line_val.trim()]);
-    }
-    let mut val = Vec::new();
-    if !first_line_val.is_empty() {
-        val.push(first_line_val.trim());
-    }
-    let sub_indent = indent_level(lines, line_off);
-    while line_off < lines.len() {
-        let cur_indent = indent_level(lines, line_off);
-        if cur_indent == lines[line_off].len() {
-            val.push("");
+    let mut val = vec![first_line_val];
+    if line_off < lines.len() {
+        let sub_indent = indent_level(lines, line_off);
+        while line_off < lines.len() {
+            let cur_indent = indent_level(lines, line_off);
+            if cur_indent == lines[line_off].len() {
+                val.push("");
+                line_off += 1;
+                continue;
+            }
+            if cur_indent <= indent {
+                break;
+            }
+            val.push(&lines[line_off][sub_indent..].trim());
             line_off += 1;
-            continue;
         }
-        if cur_indent <= indent {
-            break;
-        }
-        val.push(&lines[line_off][sub_indent..].trim());
-        line_off += 1;
     }
-    while !val.is_empty() {
-        if !val[val.len() - 1].is_empty() {
-            break;
-        }
-        val.pop().unwrap();
+    // Remove trailing empty strings
+    val.drain(
+        val.iter()
+            .rposition(|x| !x.is_empty())
+            .map(|x| x + 1)
+            .unwrap_or(val.len())..,
+    );
+    // Remove leading empty strings
+    val.drain(0..val.iter().position(|x| !x.is_empty()).unwrap_or(0));
+    if val.is_empty() {
+        panic!("Key without value at line {}", orig_line_off);
     }
     (line_off, key, val)
 }

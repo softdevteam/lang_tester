@@ -97,9 +97,13 @@
 //! Lines not mentioned are not tested: for example, the above file does not state whether the
 //! `Compiler`s `stdout` should have content or not (but note that the line `stdout:` on its own
 //! would state that the `Compiler` should have no content at all). `stderr`/`stdout` tests can use
-//! `...` as a simple wildcard: if a line consists solely of `...`, it means either "match zero or
-//! more lines"; if a line begins with `...`, it means "match the remainder of the line only".
+//! `...` as a simple wildcard: if a line consists solely of `...`, it means "match zero or
+//! more lines"; if a line begins with `...`, it means "match the remainder of the line only";
+//! if a line ends with `...`, it means "match the start of the line only". A line may start and
+//! end with `...`. `stderr`/`stdout` matches ignore leading/trailing whitespace and newlines, but
+//! are case sensitive.
 
+mod fuzzy;
 mod parser;
 mod tester;
 
