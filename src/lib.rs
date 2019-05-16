@@ -7,7 +7,7 @@
 // at your option. This file may not be copied, modified, or distributed except according to those
 // terms.
 
-//! This crate provide a simple language testing framework designed to help when you are testing
+//! This crate provides a simple language testing framework designed to help when you are testing
 //! things like compilers and virtual machines. It allows users to embed simple tests for process
 //! success/failure and for stderr/stdout inside a source file. It is loosely based on the
 //! [`compiletest_rs`](https://crates.io/crates/compiletest_rs) crate, but is much simpler (and
@@ -102,6 +102,35 @@
 //! if a line ends with `...`, it means "match the start of the line only". A line may start and
 //! end with `...`. `stderr`/`stdout` matches ignore leading/trailing whitespace and newlines, but
 //! are case sensitive.
+//!
+//! `lang_tester`'s output is deliberately similar to Rust's normal testing output. Running the
+//! example `rust_lang_tester` in this crate produces the following output:
+//!
+//! ```text
+//! $ cargo run --example=rust_lang_tester
+//!    Compiling lang_tester v0.1.0 (/home/ltratt/scratch/softdev/lang_tester)
+//!     Finished dev [unoptimized + debuginfo] target(s) in 3.41s
+//!      Running `target/debug/examples/rust_lang_tester`
+//!
+//! running 3 tests
+//! test lang_tests::no_main ... ok
+//! test lang_tests::unknown_var ... ok
+//! test lang_tests::unused_var ... ok
+//!
+//! test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+//! ```
+//!
+//! Users will often want to integrate such tests into their test suite. An easy way of doing this
+//! is to add a `[[test]]` entry to your `Cargo.toml` along the following lines:
+//!
+//! ```text
+//! [[test]]
+//! name = "lang_tests"
+//! path = "lang_tests/run_tests.rs"
+//! harness = false
+//! ```
+//!
+//! Running `cargo test` will now also run your lang tests.
 
 mod fuzzy;
 mod parser;

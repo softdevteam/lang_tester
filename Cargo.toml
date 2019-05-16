@@ -1,12 +1,19 @@
 [package]
 name = "lang_tester"
+description = "Concise language testing framework for compilers and VMs"
+repository = "https://github.com/softdevteam/lang_tester/"
 version = "0.1.0"
 authors = ["Laurence Tratt <laurie@tratt.net>"]
+readme = "README.md"
+# This should be "Apache-2.0 OR MIT OR UPL-1.0" but crates.io doesn't know about
+# UPL-1.0.
+license = "Apache-2.0 OR MIT"
+categories = ["development-tools"]
 edition = "2018"
 
 [[example]]
 name = "rust_lang_tester"
-path = "examples/rust_lang_tester/tester.rs"
+path = "examples/rust_lang_tester/run_tests.rs"
 
 [dependencies]
 termcolor = "1.0"
