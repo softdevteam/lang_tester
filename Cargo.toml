@@ -6,7 +6,7 @@ edition = "2018"
 
 [[example]]
 name = "rust_lang_tester"
-path = "examples/rust_lang_tester/tester.rs"
+path = "examples/rust_lang_tester/run_tests.rs"
 
 [dependencies]
 termcolor = "1.0"
