@@ -9,7 +9,7 @@
 
 use std::collections::hash_map::{Entry, HashMap};
 
-use crate::tester::Test;
+use crate::tester::{Status, Test};
 
 /// Parse test input into a set of `Test`s.
 pub(crate) fn parse_tests<'a>(test_str: &'a str) -> HashMap<String, Test<'a>> {
@@ -55,11 +55,18 @@ pub(crate) fn parse_tests<'a>(test_str: &'a str) -> HashMap<String, Test<'a>> {
                     match key {
                         "status" => {
                             let val_str = val.join("\n");
-                            let v_lower = val_str.to_lowercase();
-                            if v_lower != "success" && v_lower != "error" {
-                                panic!("Unknown status '{}' on line {}", val_str, line_off);
-                            }
-                            test.status = Some(v_lower);
+                            let status = match val_str.to_lowercase().as_str() {
+                                "success" => Status::Success,
+                                "error" => Status::Error,
+                                x => {
+                                    if let Ok(i) = x.parse::<i32>() {
+                                        Status::Int(i)
+                                    } else {
+                                        panic!("Unknown status '{}' on line {}", val_str, line_off);
+                                    }
+                                }
+                            };
+                            test.status = Some(status);
                         }
                         "stderr" => {
                             test.stderr = Some(val);
