@@ -77,7 +77,7 @@ pub(crate) fn parse_tests<'a>(test_str: &'a str) -> HashMap<String, Test<'a>> {
     tests
 }
 
-fn indent_level(lines: &Vec<&str>, line_off: usize) -> usize {
+fn indent_level(lines: &[&str], line_off: usize) -> usize {
     lines[line_off]
         .chars()
         .take_while(|c| c.is_whitespace())
@@ -85,7 +85,7 @@ fn indent_level(lines: &Vec<&str>, line_off: usize) -> usize {
 }
 
 /// Turn a line such as `key: val` into its separate components.
-fn key_val<'a>(lines: &Vec<&'a str>, line_off: usize, indent: usize) -> (&'a str, &'a str) {
+fn key_val<'a>(lines: &[&'a str], line_off: usize, indent: usize) -> (&'a str, &'a str) {
     let line = lines[line_off];
     let key_len = line[indent..]
         .chars()
@@ -111,7 +111,7 @@ fn key_val<'a>(lines: &Vec<&'a str>, line_off: usize, indent: usize) -> (&'a str
 /// Turn one more lines of the format `key: val` (where `val` may spread over many lines) into its
 /// separate components. Guarantees to trim leading and trailing newlines.
 fn key_multiline_val<'a>(
-    lines: &Vec<&'a str>,
+    lines: &[&'a str],
     mut line_off: usize,
     indent: usize,
 ) -> (usize, &'a str, Vec<&'a str>) {
@@ -140,7 +140,7 @@ fn key_multiline_val<'a>(
         val.iter()
             .rposition(|x| !x.is_empty())
             .map(|x| x + 1)
-            .unwrap_or(val.len())..,
+            .unwrap_or_else(|| val.len())..,
     );
     // Remove leading empty strings
     val.drain(0..val.iter().position(|x| !x.is_empty()).unwrap_or(0));
