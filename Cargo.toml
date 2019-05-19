@@ -16,6 +16,7 @@ name = "rust_lang_tester"
 path = "examples/rust_lang_tester/run_tests.rs"
 
 [dependencies]
+getopts = "0.2"
 termcolor = "1.0"
 walkdir = "2"
 

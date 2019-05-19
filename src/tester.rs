@@ -9,12 +9,14 @@
 
 use std::{
     collections::{hash_map::HashMap, HashSet},
+    env,
     fs::read_to_string,
     io::{self, Write},
     path::{Path, PathBuf},
     process::{self, Command},
 };
 
+use getopts::Options;
 use termcolor::{Color, ColorChoice, ColorSpec, StandardStream, WriteColor};
 use walkdir::WalkDir;
 
@@ -25,6 +27,8 @@ pub struct LangTester<'a> {
     test_file_filter: Option<Box<Fn(&Path) -> bool>>,
     test_extract: Option<Box<Fn(&str) -> Option<String>>>,
     test_cmds: Option<Box<Fn(&Path) -> Vec<(&str, Command)>>>,
+    use_cmdline_args: bool,
+    cmdline_filters: Option<Vec<String>>,
 }
 
 impl<'a> LangTester<'a> {
@@ -37,6 +41,8 @@ impl<'a> LangTester<'a> {
             test_file_filter: None,
             test_extract: None,
             test_cmds: None,
+            use_cmdline_args: true,
+            cmdline_filters: None,
         }
     }
 
@@ -144,6 +150,28 @@ impl<'a> LangTester<'a> {
         self
     }
 
+    /// If set to `true`, this reads arguments from `std::env::args()` and interprets them in the
+    /// same way as normal cargo test files. For example if you have tests "ab" and "cd" but only
+    /// want to run the latter:
+    ///
+    /// ```sh
+    /// $ <test bin> c
+    /// ```
+    ///
+    /// As this suggests, a simple substring search is used to decide which tests to run.
+    ///
+    /// You can get help on `lang_tester`'s options:
+    ///
+    /// ```sh
+    /// $ <test bin> --help
+    /// ```
+    ///
+    /// This option defaults to `true`.
+    pub fn use_cmdline_args(&'a mut self, use_cmdline_args: bool) -> &'a mut Self {
+        self.use_cmdline_args = use_cmdline_args;
+        self
+    }
+
     /// Make sure the user has specified the minimum set of things we need from them.
     fn validate(&self) {
         if self.test_dir.is_none() {
@@ -157,24 +185,60 @@ impl<'a> LangTester<'a> {
         }
     }
 
-    /// Enumerate all the test files we need to check.
-    fn test_files(&self) -> Vec<PathBuf> {
-        WalkDir::new(self.test_dir.unwrap())
+    /// Enumerate all the test files we need to check, along with the number of files filtered out
+    /// (e.g. if you have tests `a, b, c` and the user does something like `cargo test b`, 2 tests
+    /// (`a` and `c`) will be filtered out.
+    fn test_files(&self) -> (Vec<PathBuf>, usize) {
+        let mut num_filtered = 0;
+        let paths = WalkDir::new(self.test_dir.unwrap())
             .into_iter()
             .filter_map(|x| x.ok())
             .filter(|x| x.file_type().is_file())
+            // Filter out non-test files
             .filter(|x| match self.test_file_filter.as_ref() {
                 Some(f) => f(x.path()),
                 None => true,
             })
+            // If the user has named one or more tests on the command-line, run only those,
+            // filtering out the rest (counting them as ignored).
+            .filter(|x| {
+                let x_path = x.path().to_str().unwrap();
+                match self.cmdline_filters.as_ref() {
+                    Some(fs) => {
+                        debug_assert!(self.use_cmdline_args);
+                        for f in fs {
+                            if x_path.contains(f) {
+                                return true;
+                            }
+                        }
+                        num_filtered += 1;
+                        false
+                    }
+                    None => true,
+                }
+            })
             .map(|x| x.into_path())
-            .collect()
+            .collect();
+        (paths, num_filtered)
     }
 
     /// Run all the lang tests.
     pub fn run(&mut self) {
         self.validate();
-        let test_files = self.test_files();
+        if self.use_cmdline_args {
+            let args: Vec<String> = env::args().collect();
+            let matches = Options::new()
+                .optflag("h", "help", "")
+                .parse(&args[1..])
+                .unwrap_or_else(|_| usage());
+            if matches.opt_present("h") {
+                usage();
+            }
+            if !matches.free.is_empty() {
+                self.cmdline_filters = Some(matches.free);
+            }
+        }
+        let (test_files, num_filtered) = self.test_files();
         eprint!("\nrunning {} tests", test_files.len());
         let mut failures = Vec::new();
         let mut num_ignored = 0;
@@ -270,7 +334,7 @@ impl<'a> LangTester<'a> {
             }
         }
 
-        self.pp_failures(&failures, test_files.len(), num_ignored);
+        self.pp_failures(&failures, test_files.len(), num_ignored, num_filtered);
 
         if !failures.is_empty() {
             process::exit(1);
@@ -301,6 +365,7 @@ impl<'a> LangTester<'a> {
         failures: &[(&str, TestFailure)],
         test_files_len: usize,
         num_ignored: usize,
+        num_filtered: usize,
     ) {
         if !failures.is_empty() {
             eprintln!("\n\nfailures:");
@@ -328,10 +393,11 @@ impl<'a> LangTester<'a> {
             output_failed();
         }
         eprintln!(
-            ". {} passed; {} failed; {} ignored; 0 measured; 0 filtered out\n",
+            ". {} passed; {} failed; {} ignored; 0 measured; {} filtered out\n",
             test_files_len - failures.len(),
             failures.len(),
-            num_ignored
+            num_ignored,
+            num_filtered
         );
     }
 }
@@ -379,4 +445,9 @@ fn output_failed() {
 
 fn output_ok() {
     write_with_colour("ok", Color::Green);
+}
+
+fn usage() -> ! {
+    eprintln!("Usage: <filter1> [... <filtern>]");
+    process::exit(1);
 }
