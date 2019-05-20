@@ -134,6 +134,10 @@
 //!
 //! Running `cargo test` will now also run your lang tests.
 
+#![allow(clippy::new_without_default)]
+#![allow(clippy::redundant_closure)]
+#![allow(clippy::type_complexity)]
+
 mod fuzzy;
 mod parser;
 mod tester;
