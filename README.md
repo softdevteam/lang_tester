@@ -111,13 +111,30 @@ output:
 ```text
 $ cargo run --example=rust_lang_tester
    Compiling lang_tester v0.1.0 (/home/ltratt/scratch/softdev/lang_tester)
-    Finished dev [unoptimized + debuginfo] target(s) in 3.41s
+    Finished dev [unoptimized + debuginfo] target(s) in 3.49s
      Running `target/debug/examples/rust_lang_tester`
 
-running 3 tests
+running 4 tests
 test lang_tests::no_main ... ok
 test lang_tests::unknown_var ... ok
 test lang_tests::unused_var ... ok
+test lang_tests::exit_code ... ok
 
-test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+```
+
+If you want to run a subset of tests, you can specify simple filters which use
+substring match to run a subset of tests:
+
+```text
+$ cargo run --example=rust_lang_tester var
+   Compiling lang_tester v0.1.0 (/home/ltratt/scratch/softdev/lang_tester)
+    Finished dev [unoptimized + debuginfo] target(s) in 3.37s
+     Running `target/debug/examples/rust_lang_tester var`
+
+running 2 tests
+test lang_tests::unknown_var ... ok
+test lang_tests::unused_var ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out
 ```
