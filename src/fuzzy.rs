@@ -11,7 +11,7 @@ const WILDCARD: &str = "...";
 
 /// Does `s` conform to the fuzzy pattern `pattern`? Note that `plines` is expected not to start or
 /// end with blank lines, and each line is expected to be `trim`ed.
-pub(crate) fn match_vec(plines: &[&str], s: &str) -> bool {
+pub(crate) fn match_vec(plines: &Vec<String>, s: &str) -> bool {
     let slines = s.trim().lines().map(|x| x.trim()).collect::<Vec<_>>();
 
     let mut pi = 0;
@@ -26,10 +26,10 @@ pub(crate) fn match_vec(plines: &[&str], s: &str) -> bool {
             if plines[pi] == WILDCARD {
                 panic!("Can't have '{}' on two consecutive lines.", WILDCARD);
             }
-            while si < slines.len() && !match_line(plines[pi], slines[si]) {
+            while si < slines.len() && !match_line(&plines[pi], slines[si]) {
                 si += 1;
             }
-        } else if match_line(plines[pi], slines[si]) {
+        } else if match_line(&plines[pi], slines[si]) {
             pi += 1;
             si += 1;
         } else {
@@ -64,7 +64,7 @@ mod tests {
     #[test]
     fn test_match_vec() {
         fn match_vec_helper(p: &str, s: &str) -> bool {
-            match_vec(&p.lines().collect::<Vec<_>>(), s)
+            match_vec(&p.lines().map(|x| x.to_owned()).collect::<Vec<_>>(), s)
         }
         assert!(match_vec_helper("", ""));
         assert!(match_vec_helper("a", "a"));

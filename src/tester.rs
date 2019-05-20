@@ -14,10 +14,13 @@ use std::{
     io::{self, Write},
     path::{Path, PathBuf},
     process::{self, Command},
+    sync::{Arc, Mutex},
 };
 
 use getopts::Options;
+use num_cpus;
 use termcolor::{Color, ColorChoice, ColorSpec, StandardStream, WriteColor};
+use threadpool::ThreadPool;
 use walkdir::WalkDir;
 
 use crate::{fuzzy, parser::parse_tests};
@@ -240,16 +243,15 @@ impl<'a> LangTester<'a> {
         }
         let (test_files, num_filtered) = self.test_files();
         eprint!("\nrunning {} tests", test_files.len());
-        let mut failures = Vec::new();
+        let failures = Arc::new(Mutex::new(Vec::new()));
         let mut num_ignored = 0;
-        for p in &test_files {
-            let test_name = p.file_stem().unwrap().to_str().unwrap();
-            eprint!("\ntest lang_tests::{} ... ", test_name);
-            let all_str = read_to_string(p.as_path())
-                .unwrap_or_else(|_| panic!(format!("Couldn't read {}", test_name)));
-            let test_str = self.test_extract.as_ref().unwrap()(&all_str).unwrap_or_else(|| {
-                panic!(format!("Couldn't extract test string from {}", test_name))
-            });
+        let pool = ThreadPool::new(num_cpus::get());
+        'b: for p in &test_files {
+            let test_name = p.file_stem().unwrap().to_str().unwrap().to_owned();
+            let all_str =
+                read_to_string(p.as_path()).expect(&format!("Couldn't read {}", test_name));
+            let test_str = self.test_extract.as_ref().unwrap()(&all_str)
+                .expect(&format!("Couldn't extract test string from {}", test_name));
             if test_str.is_empty() {
                 write_with_colour("ignored", Color::Yellow);
                 eprint!(" (test string is empty)");
@@ -264,76 +266,99 @@ impl<'a> LangTester<'a> {
                 .collect::<Vec<_>>();
             self.check_names(&cmd_pairs, &tests);
 
-            let mut failure = TestFailure {
-                status: None,
-                stderr: None,
-                stdout: None,
-            };
-            for (cmd_name, mut cmd) in cmd_pairs {
-                let output = cmd
-                    .output()
-                    .unwrap_or_else(|_| panic!(format!("Couldn't run command {:?}.", cmd)));
-
-                let test = match tests.get(&cmd_name) {
-                    Some(t) => t,
-                    None => continue,
-                };
-                let mut meant_to_error = false;
-                if let Some(ref status) = test.status {
-                    match status {
-                        Status::Success => {
-                            if !output.status.success() {
-                                failure.status = Some("Error".to_owned());
-                            }
-                        }
-                        Status::Error => {
-                            meant_to_error = true;
-                            if output.status.success() {
-                                failure.status = Some("Success".to_owned());
-                            }
-                        }
-                        Status::Int(i) => {
-                            let code = output.status.code();
-                            if code != Some(*i) {
-                                failure.status = Some(
-                                    code.map(|x| x.to_string())
-                                        .unwrap_or_else(|| "Exited due to signal".to_owned()),
-                                );
-                            }
-                        }
-                    }
-                }
-                if let Some(ref stderr) = test.stderr {
-                    let stderr_utf8 = String::from_utf8(output.stderr).unwrap();
-                    if !fuzzy::match_vec(stderr, &stderr_utf8) {
-                        failure.stderr = Some(stderr_utf8);
-                    }
-                }
-                if let Some(ref stdout) = test.stdout {
-                    let stdout_utf8 = String::from_utf8(output.stdout).unwrap();
-                    if !fuzzy::match_vec(stdout, &stdout_utf8) {
-                        failure.stdout = Some(stdout_utf8);
-                    }
-                }
-                if !output.status.success() && meant_to_error {
-                    break;
-                }
-            }
-
-            if failure
-                != (TestFailure {
+            let failures = failures.clone();
+            pool.execute(move || {
+                let mut failure = TestFailure {
                     status: None,
                     stderr: None,
                     stdout: None,
-                })
-            {
-                failures.push((test_name, failure));
-                output_failed();
-            } else {
-                output_ok();
-            }
-        }
+                };
+                for (cmd_name, mut cmd) in cmd_pairs {
+                    let output = cmd
+                        .output()
+                        .expect(&format!("Couldn't run command {:?}.", cmd));
 
+                    let test = match tests.get(&cmd_name) {
+                        Some(t) => t,
+                        None => continue,
+                    };
+                    let mut meant_to_error = false;
+                    if let Some(ref status) = test.status {
+                        match status {
+                            Status::Success => {
+                                if !output.status.success() {
+                                    failure.status = Some("Error".to_owned());
+                                }
+                            }
+                            Status::Error => {
+                                meant_to_error = true;
+                                if output.status.success() {
+                                    failure.status = Some("Success".to_owned());
+                                }
+                            }
+                            Status::Int(i) => {
+                                let code = output.status.code();
+                                if code != Some(*i) {
+                                    failure.status = Some(
+                                        code.map(|x| x.to_string())
+                                            .unwrap_or_else(|| "Exited due to signal".to_owned()),
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    if let Some(ref stderr) = test.stderr {
+                        let stderr_utf8 = String::from_utf8(output.stderr).unwrap();
+                        if !fuzzy::match_vec(stderr, &stderr_utf8) {
+                            failure.stderr = Some(stderr_utf8);
+                        }
+                    }
+                    if let Some(ref stdout) = test.stdout {
+                        let stdout_utf8 = String::from_utf8(output.stdout).unwrap();
+                        if !fuzzy::match_vec(stdout, &stdout_utf8) {
+                            failure.stdout = Some(stdout_utf8);
+                        }
+                    }
+                    if !output.status.success() && meant_to_error {
+                        break;
+                    }
+                }
+
+                {
+                    // Grab a lock on stderr so that we can avoid the possibility of lines blurring
+                    // together in confusing ways.
+                    let stderr = StandardStream::stderr(ColorChoice::Always);
+                    let mut handle = stderr.lock();
+                    handle
+                        .write_all(&format!("\ntest lang_tests::{} ... ", test_name).as_bytes())
+                        .ok();
+                    if failure
+                        != (TestFailure {
+                            status: None,
+                            stderr: None,
+                            stdout: None,
+                        })
+                    {
+                        let mut failures = failures.lock().unwrap();
+                        failures.push((test_name, failure));
+                        handle
+                            .set_color(ColorSpec::new().set_fg(Some(Color::Red)))
+                            .ok();
+                        handle.write_all("FAILED".as_bytes()).ok();
+                        handle.reset().ok();
+                    } else {
+                        handle
+                            .set_color(ColorSpec::new().set_fg(Some(Color::Green)))
+                            .ok();
+                        handle.write_all("ok".as_bytes()).ok();
+                        handle.reset().ok();
+                    }
+                }
+            });
+        }
+        pool.join();
+
+        let failures = Mutex::into_inner(Arc::try_unwrap(failures).unwrap()).unwrap();
         self.pp_failures(&failures, test_files.len(), num_ignored, num_filtered);
 
         if !failures.is_empty() {
@@ -362,7 +387,7 @@ impl<'a> LangTester<'a> {
     /// Pretty print any failures to `stderr`.
     fn pp_failures(
         &self,
-        failures: &[(&str, TestFailure)],
+        failures: &Vec<(String, TestFailure)>,
         test_files_len: usize,
         num_ignored: usize,
         num_filtered: usize,
@@ -388,9 +413,9 @@ impl<'a> LangTester<'a> {
 
         eprint!("\n\ntest result: ");
         if failures.is_empty() {
-            output_ok();
+            write_with_colour("ok", Color::Green);
         } else {
-            output_failed();
+            write_with_colour("FAILED", Color::Red);
         }
         eprintln!(
             ". {} passed; {} failed; {} ignored; 0 measured; {} filtered out\n",
@@ -403,7 +428,7 @@ impl<'a> LangTester<'a> {
 }
 
 /// The status of an executed command.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) enum Status {
     /// The command exited successfully (by whatever definition of "successful" the running
     /// platform uses).
@@ -417,11 +442,11 @@ pub(crate) enum Status {
 }
 
 /// A user `Test`.
-#[derive(Debug)]
-pub(crate) struct Test<'a> {
+#[derive(Clone, Debug)]
+pub(crate) struct Test {
     pub status: Option<Status>,
-    pub stderr: Option<Vec<&'a str>>,
-    pub stdout: Option<Vec<&'a str>>,
+    pub stderr: Option<Vec<String>>,
+    pub stdout: Option<Vec<String>>,
 }
 
 /// If a test fails, the parts that fail are set to `Some(...)` in an instance of this struct.
@@ -437,14 +462,6 @@ fn write_with_colour(s: &str, colour: Color) {
     stderr.set_color(ColorSpec::new().set_fg(Some(colour))).ok();
     io::stderr().write_all(s.as_bytes()).ok();
     stderr.reset().ok();
-}
-
-fn output_failed() {
-    write_with_colour("FAILED", Color::Red);
-}
-
-fn output_ok() {
-    write_with_colour("ok", Color::Green);
 }
 
 fn usage() -> ! {
