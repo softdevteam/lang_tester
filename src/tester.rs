@@ -30,13 +30,19 @@ pub struct LangTester<'a> {
     use_cmdline_args: bool,
     test_file_filter: Option<Box<Fn(&Path) -> bool>>,
     cmdline_filters: Option<Vec<String>>,
-    inner: Arc<LangTesterInner>,
+    inner: Arc<LangTesterPooler>,
 }
 
-struct LangTesterInner {
-    test_extract: Option<Box<Fn(&str) -> Option<String>>>,
-    test_cmds: Option<Box<Fn(&Path) -> Vec<(&str, Command)>>>,
+/// This is the information shared across test threads and which needs to be hidden behind an
+/// `Arc`.
+struct LangTesterPooler {
+    test_extract: Option<Box<Fn(&str) -> Option<String> + Send>>,
+    test_cmds: Option<Box<Fn(&Path) -> Vec<(&str, Command)> + Send>>,
 }
+
+// `LangTestInner` isn't `Sync` because of the presence of `Command` in a function signature. Since
+// this is clearly safe (we're not syncing `Command`s, but function references), we are OK.
+unsafe impl Sync for LangTesterPooler {}
 
 impl<'a> LangTester<'a> {
     /// Create a new `LangTester` with default options. Note that, at a minimum, you need to call
@@ -48,7 +54,7 @@ impl<'a> LangTester<'a> {
             test_file_filter: None,
             use_cmdline_args: true,
             cmdline_filters: None,
-            inner: Arc::new(LangTesterInner {
+            inner: Arc::new(LangTesterPooler {
                 test_extract: None,
                 test_cmds: None,
             }),
@@ -107,7 +113,7 @@ impl<'a> LangTester<'a> {
     /// ```
     pub fn test_extract<F>(&'a mut self, test_extract: F) -> &'a mut Self
     where
-        F: 'static + Fn(&str) -> Option<String>,
+        F: 'static + Fn(&str) -> Option<String> + Send,
     {
         Arc::get_mut(&mut self.inner).unwrap().test_extract = Some(Box::new(test_extract));
         self
@@ -153,7 +159,7 @@ impl<'a> LangTester<'a> {
     /// ```
     pub fn test_cmds<F>(&'a mut self, test_cmds: F) -> &'a mut Self
     where
-        F: 'static + Fn(&Path) -> Vec<(&str, Command)>,
+        F: 'static + Fn(&Path) -> Vec<(&str, Command)> + Send,
     {
         Arc::get_mut(&mut self.inner).unwrap().test_cmds = Some(Box::new(test_cmds));
         self
@@ -249,9 +255,10 @@ impl<'a> LangTester<'a> {
         }
         let (test_files, num_filtered) = self.test_files();
         eprint!("\nrunning {} tests", test_files.len());
-        let (failures, num_ignored) = run_tests(&test_files, Arc::clone(&self.inner));
+        let test_files_len = test_files.len();
+        let (failures, num_ignored) = run_tests(test_files, Arc::clone(&self.inner));
 
-        self.pp_failures(&failures, test_files.len(), num_ignored, num_filtered);
+        self.pp_failures(&failures, test_files_len, num_ignored, num_filtered);
 
         if !failures.is_empty() {
             process::exit(1);
@@ -317,10 +324,10 @@ pub(crate) enum Status {
 
 /// A user `Test`.
 #[derive(Clone, Debug)]
-pub(crate) struct Test {
+pub(crate) struct Test<'a> {
     pub status: Option<Status>,
-    pub stderr: Option<Vec<String>>,
-    pub stdout: Option<Vec<String>>,
+    pub stderr: Option<Vec<&'a str>>,
+    pub stdout: Option<Vec<&'a str>>,
 }
 
 /// If a test fails, the parts that fail are set to `Some(...)` in an instance of this struct.
@@ -346,7 +353,7 @@ fn usage() -> ! {
 /// Check for the case where the user has a test called `X` but `test_cmds` doesn't have a command
 /// with a matching name. This is almost certainly a bug, in the sense that the test can never,
 /// ever fire.
-fn check_names(cmd_pairs: &Vec<(String, Command)>, tests: &HashMap<String, Test>) {
+fn check_names<'a>(cmd_pairs: &[(String, Command)], tests: &HashMap<String, Test<'a>>) {
     let cmd_names = cmd_pairs.iter().map(|x| &x.0).collect::<HashSet<_>>();
     let test_names = tests.keys().map(|x| x).collect::<HashSet<_>>();
     let diff = test_names
@@ -361,32 +368,49 @@ fn check_names(cmd_pairs: &Vec<(String, Command)>, tests: &HashMap<String, Test>
     }
 }
 
-fn run_tests(test_files: &Vec<PathBuf>, inner: Arc<LangTesterInner>) -> (Vec<(String, TestFailure)>, usize) {
+/// Run every test in `test_files`, returning a tuple `(failures, num_ignored)`.
+fn run_tests(
+    test_files: Vec<PathBuf>,
+    inner: Arc<LangTesterPooler>,
+) -> (Vec<(String, TestFailure)>, usize) {
     let failures = Arc::new(Mutex::new(Vec::new()));
     let mut num_ignored = 0;
     let pool = ThreadPool::new(num_cpus::get());
-    'b: for p in test_files {
+    for p in test_files {
         let test_name = p.file_stem().unwrap().to_str().unwrap().to_owned();
-        let all_str =
-            read_to_string(p.as_path()).expect(&format!("Couldn't read {}", test_name));
-        let test_str = inner.test_extract.as_ref().unwrap()(&all_str)
-            .expect(&format!("Couldn't extract test string from {}", test_name));
-        if test_str.is_empty() {
-            write_with_colour("ignored", Color::Yellow);
-            eprint!(" (test string is empty)");
-            num_ignored += 1;
-            continue;
-        }
-
-        let tests = parse_tests(&test_str);
-        let cmd_pairs = inner.test_cmds.as_ref().unwrap()(p.as_path())
-            .into_iter()
-            .map(|(test_name, cmd)| (test_name.to_lowercase(), cmd))
-            .collect::<Vec<_>>();
-        check_names(&cmd_pairs, &tests);
 
         let failures = failures.clone();
+        let inner = inner.clone();
         pool.execute(move || {
+            let all_str =
+                read_to_string(p.as_path()).expect(&format!("Couldn't read {}", test_name));
+            let test_str = inner.test_extract.as_ref().unwrap()(&all_str)
+                .expect(&format!("Couldn't extract test string from {}", test_name));
+            if test_str.is_empty() {
+                // Grab a lock on stderr so that we can avoid the possibility of lines blurring
+                // together in confusing ways.
+                let stderr = StandardStream::stderr(ColorChoice::Always);
+                let mut handle = stderr.lock();
+                handle
+                    .write_all(&format!("\ntest lang_tests::{} ... ", test_name).as_bytes())
+                    .ok();
+                handle
+                    .set_color(ColorSpec::new().set_fg(Some(Color::Yellow)))
+                    .ok();
+                handle.write_all("ignored".as_bytes()).ok();
+                handle.reset().ok();
+                handle.write_all(" (test string is empty)".as_bytes()).ok();
+                num_ignored += 1;
+                return;
+            }
+
+            let tests = parse_tests(&test_str);
+            let cmd_pairs = inner.test_cmds.as_ref().unwrap()(p.as_path())
+                .into_iter()
+                .map(|(test_name, cmd)| (test_name.to_lowercase(), cmd))
+                .collect::<Vec<_>>();
+            check_names(&cmd_pairs, &tests);
+
             let mut failure = TestFailure {
                 status: None,
                 stderr: None,

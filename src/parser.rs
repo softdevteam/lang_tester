@@ -69,12 +69,10 @@ pub(crate) fn parse_tests(test_str: &str) -> HashMap<String, Test> {
                             test.status = Some(status);
                         }
                         "stderr" => {
-                            test.stderr =
-                                Some(val.iter().map(|x| x.to_string()).collect::<Vec<_>>());
+                            test.stderr = Some(val);
                         }
                         "stdout" => {
-                            test.stdout =
-                                Some(val.iter().map(|x| x.to_string()).collect::<Vec<_>>());
+                            test.stdout = Some(val);
                         }
                         _ => panic!("Unknown key '{}' on line {}.", key, line_off),
                     }
