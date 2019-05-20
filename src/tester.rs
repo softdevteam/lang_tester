@@ -27,11 +27,15 @@ use crate::{fuzzy, parser::parse_tests};
 
 pub struct LangTester<'a> {
     test_dir: Option<&'a str>,
+    use_cmdline_args: bool,
     test_file_filter: Option<Box<Fn(&Path) -> bool>>,
+    cmdline_filters: Option<Vec<String>>,
+    inner: Arc<LangTesterInner>,
+}
+
+struct LangTesterInner {
     test_extract: Option<Box<Fn(&str) -> Option<String>>>,
     test_cmds: Option<Box<Fn(&Path) -> Vec<(&str, Command)>>>,
-    use_cmdline_args: bool,
-    cmdline_filters: Option<Vec<String>>,
 }
 
 impl<'a> LangTester<'a> {
@@ -42,10 +46,12 @@ impl<'a> LangTester<'a> {
         LangTester {
             test_dir: None,
             test_file_filter: None,
-            test_extract: None,
-            test_cmds: None,
             use_cmdline_args: true,
             cmdline_filters: None,
+            inner: Arc::new(LangTesterInner {
+                test_extract: None,
+                test_cmds: None,
+            }),
         }
     }
 
@@ -103,7 +109,7 @@ impl<'a> LangTester<'a> {
     where
         F: 'static + Fn(&str) -> Option<String>,
     {
-        self.test_extract = Some(Box::new(test_extract));
+        Arc::get_mut(&mut self.inner).unwrap().test_extract = Some(Box::new(test_extract));
         self
     }
 
@@ -149,7 +155,7 @@ impl<'a> LangTester<'a> {
     where
         F: 'static + Fn(&Path) -> Vec<(&str, Command)>,
     {
-        self.test_cmds = Some(Box::new(test_cmds));
+        Arc::get_mut(&mut self.inner).unwrap().test_cmds = Some(Box::new(test_cmds));
         self
     }
 
@@ -180,10 +186,10 @@ impl<'a> LangTester<'a> {
         if self.test_dir.is_none() {
             panic!("test_dir must be specified.");
         }
-        if self.test_extract.is_none() {
+        if self.inner.test_extract.is_none() {
             panic!("test_extract must be specified.");
         }
-        if self.test_cmds.is_none() {
+        if self.inner.test_cmds.is_none() {
             panic!("test_cmds must be specified.");
         }
     }
@@ -250,7 +256,7 @@ impl<'a> LangTester<'a> {
             let test_name = p.file_stem().unwrap().to_str().unwrap().to_owned();
             let all_str =
                 read_to_string(p.as_path()).expect(&format!("Couldn't read {}", test_name));
-            let test_str = self.test_extract.as_ref().unwrap()(&all_str)
+            let test_str = self.inner.test_extract.as_ref().unwrap()(&all_str)
                 .expect(&format!("Couldn't extract test string from {}", test_name));
             if test_str.is_empty() {
                 write_with_colour("ignored", Color::Yellow);
@@ -260,7 +266,7 @@ impl<'a> LangTester<'a> {
             }
 
             let tests = parse_tests(&test_str);
-            let cmd_pairs = self.test_cmds.as_mut().unwrap()(p.as_path())
+            let cmd_pairs = self.inner.test_cmds.as_ref().unwrap()(p.as_path())
                 .into_iter()
                 .map(|(test_name, cmd)| (test_name.to_lowercase(), cmd))
                 .collect::<Vec<_>>();
