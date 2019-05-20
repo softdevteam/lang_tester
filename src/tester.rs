@@ -249,144 +249,12 @@ impl<'a> LangTester<'a> {
         }
         let (test_files, num_filtered) = self.test_files();
         eprint!("\nrunning {} tests", test_files.len());
-        let failures = Arc::new(Mutex::new(Vec::new()));
-        let mut num_ignored = 0;
-        let pool = ThreadPool::new(num_cpus::get());
-        'b: for p in &test_files {
-            let test_name = p.file_stem().unwrap().to_str().unwrap().to_owned();
-            let all_str =
-                read_to_string(p.as_path()).expect(&format!("Couldn't read {}", test_name));
-            let test_str = self.inner.test_extract.as_ref().unwrap()(&all_str)
-                .expect(&format!("Couldn't extract test string from {}", test_name));
-            if test_str.is_empty() {
-                write_with_colour("ignored", Color::Yellow);
-                eprint!(" (test string is empty)");
-                num_ignored += 1;
-                continue;
-            }
+        let (failures, num_ignored) = run_tests(&test_files, Arc::clone(&self.inner));
 
-            let tests = parse_tests(&test_str);
-            let cmd_pairs = self.inner.test_cmds.as_ref().unwrap()(p.as_path())
-                .into_iter()
-                .map(|(test_name, cmd)| (test_name.to_lowercase(), cmd))
-                .collect::<Vec<_>>();
-            self.check_names(&cmd_pairs, &tests);
-
-            let failures = failures.clone();
-            pool.execute(move || {
-                let mut failure = TestFailure {
-                    status: None,
-                    stderr: None,
-                    stdout: None,
-                };
-                for (cmd_name, mut cmd) in cmd_pairs {
-                    let output = cmd
-                        .output()
-                        .expect(&format!("Couldn't run command {:?}.", cmd));
-
-                    let test = match tests.get(&cmd_name) {
-                        Some(t) => t,
-                        None => continue,
-                    };
-                    let mut meant_to_error = false;
-                    if let Some(ref status) = test.status {
-                        match status {
-                            Status::Success => {
-                                if !output.status.success() {
-                                    failure.status = Some("Error".to_owned());
-                                }
-                            }
-                            Status::Error => {
-                                meant_to_error = true;
-                                if output.status.success() {
-                                    failure.status = Some("Success".to_owned());
-                                }
-                            }
-                            Status::Int(i) => {
-                                let code = output.status.code();
-                                if code != Some(*i) {
-                                    failure.status = Some(
-                                        code.map(|x| x.to_string())
-                                            .unwrap_or_else(|| "Exited due to signal".to_owned()),
-                                    );
-                                }
-                            }
-                        }
-                    }
-                    if let Some(ref stderr) = test.stderr {
-                        let stderr_utf8 = String::from_utf8(output.stderr).unwrap();
-                        if !fuzzy::match_vec(stderr, &stderr_utf8) {
-                            failure.stderr = Some(stderr_utf8);
-                        }
-                    }
-                    if let Some(ref stdout) = test.stdout {
-                        let stdout_utf8 = String::from_utf8(output.stdout).unwrap();
-                        if !fuzzy::match_vec(stdout, &stdout_utf8) {
-                            failure.stdout = Some(stdout_utf8);
-                        }
-                    }
-                    if !output.status.success() && meant_to_error {
-                        break;
-                    }
-                }
-
-                {
-                    // Grab a lock on stderr so that we can avoid the possibility of lines blurring
-                    // together in confusing ways.
-                    let stderr = StandardStream::stderr(ColorChoice::Always);
-                    let mut handle = stderr.lock();
-                    handle
-                        .write_all(&format!("\ntest lang_tests::{} ... ", test_name).as_bytes())
-                        .ok();
-                    if failure
-                        != (TestFailure {
-                            status: None,
-                            stderr: None,
-                            stdout: None,
-                        })
-                    {
-                        let mut failures = failures.lock().unwrap();
-                        failures.push((test_name, failure));
-                        handle
-                            .set_color(ColorSpec::new().set_fg(Some(Color::Red)))
-                            .ok();
-                        handle.write_all("FAILED".as_bytes()).ok();
-                        handle.reset().ok();
-                    } else {
-                        handle
-                            .set_color(ColorSpec::new().set_fg(Some(Color::Green)))
-                            .ok();
-                        handle.write_all("ok".as_bytes()).ok();
-                        handle.reset().ok();
-                    }
-                }
-            });
-        }
-        pool.join();
-
-        let failures = Mutex::into_inner(Arc::try_unwrap(failures).unwrap()).unwrap();
         self.pp_failures(&failures, test_files.len(), num_ignored, num_filtered);
 
         if !failures.is_empty() {
             process::exit(1);
-        }
-    }
-
-    /// Check for the case where the user has a test called `X` but `test_cmds` doesn't have a
-    /// command with a matching name. This is almost certainly a bug, in the sense that the test
-    /// can never, ever fire.
-    fn check_names(&self, cmd_pairs: &[(String, Command)], tests: &HashMap<String, Test>) {
-        let cmd_names = cmd_pairs.iter().map(|x| &x.0).collect::<HashSet<_>>();
-        let test_names = tests.keys().map(|x| x).collect::<HashSet<_>>();
-        let diff = test_names
-            .difference(&cmd_names)
-            .map(|x| x.as_str())
-            .collect::<Vec<_>>();
-        if !diff.is_empty() {
-            panic!(
-                "Command name(s) '{}' in tests are not found in the actual commands.",
-                diff.join(", ")
-            );
         }
     }
 
@@ -473,4 +341,142 @@ fn write_with_colour(s: &str, colour: Color) {
 fn usage() -> ! {
     eprintln!("Usage: <filter1> [... <filtern>]");
     process::exit(1);
+}
+
+/// Check for the case where the user has a test called `X` but `test_cmds` doesn't have a command
+/// with a matching name. This is almost certainly a bug, in the sense that the test can never,
+/// ever fire.
+fn check_names(cmd_pairs: &Vec<(String, Command)>, tests: &HashMap<String, Test>) {
+    let cmd_names = cmd_pairs.iter().map(|x| &x.0).collect::<HashSet<_>>();
+    let test_names = tests.keys().map(|x| x).collect::<HashSet<_>>();
+    let diff = test_names
+        .difference(&cmd_names)
+        .map(|x| x.as_str())
+        .collect::<Vec<_>>();
+    if !diff.is_empty() {
+        panic!(
+            "Command name(s) '{}' in tests are not found in the actual commands.",
+            diff.join(", ")
+        );
+    }
+}
+
+fn run_tests(test_files: &Vec<PathBuf>, inner: Arc<LangTesterInner>) -> (Vec<(String, TestFailure)>, usize) {
+    let failures = Arc::new(Mutex::new(Vec::new()));
+    let mut num_ignored = 0;
+    let pool = ThreadPool::new(num_cpus::get());
+    'b: for p in test_files {
+        let test_name = p.file_stem().unwrap().to_str().unwrap().to_owned();
+        let all_str =
+            read_to_string(p.as_path()).expect(&format!("Couldn't read {}", test_name));
+        let test_str = inner.test_extract.as_ref().unwrap()(&all_str)
+            .expect(&format!("Couldn't extract test string from {}", test_name));
+        if test_str.is_empty() {
+            write_with_colour("ignored", Color::Yellow);
+            eprint!(" (test string is empty)");
+            num_ignored += 1;
+            continue;
+        }
+
+        let tests = parse_tests(&test_str);
+        let cmd_pairs = inner.test_cmds.as_ref().unwrap()(p.as_path())
+            .into_iter()
+            .map(|(test_name, cmd)| (test_name.to_lowercase(), cmd))
+            .collect::<Vec<_>>();
+        check_names(&cmd_pairs, &tests);
+
+        let failures = failures.clone();
+        pool.execute(move || {
+            let mut failure = TestFailure {
+                status: None,
+                stderr: None,
+                stdout: None,
+            };
+            for (cmd_name, mut cmd) in cmd_pairs {
+                let output = cmd
+                    .output()
+                    .expect(&format!("Couldn't run command {:?}.", cmd));
+
+                let test = match tests.get(&cmd_name) {
+                    Some(t) => t,
+                    None => continue,
+                };
+                let mut meant_to_error = false;
+                if let Some(ref status) = test.status {
+                    match status {
+                        Status::Success => {
+                            if !output.status.success() {
+                                failure.status = Some("Error".to_owned());
+                            }
+                        }
+                        Status::Error => {
+                            meant_to_error = true;
+                            if output.status.success() {
+                                failure.status = Some("Success".to_owned());
+                            }
+                        }
+                        Status::Int(i) => {
+                            let code = output.status.code();
+                            if code != Some(*i) {
+                                failure.status = Some(
+                                    code.map(|x| x.to_string())
+                                        .unwrap_or_else(|| "Exited due to signal".to_owned()),
+                                );
+                            }
+                        }
+                    }
+                }
+                if let Some(ref stderr) = test.stderr {
+                    let stderr_utf8 = String::from_utf8(output.stderr).unwrap();
+                    if !fuzzy::match_vec(stderr, &stderr_utf8) {
+                        failure.stderr = Some(stderr_utf8);
+                    }
+                }
+                if let Some(ref stdout) = test.stdout {
+                    let stdout_utf8 = String::from_utf8(output.stdout).unwrap();
+                    if !fuzzy::match_vec(stdout, &stdout_utf8) {
+                        failure.stdout = Some(stdout_utf8);
+                    }
+                }
+                if !output.status.success() && meant_to_error {
+                    break;
+                }
+            }
+
+            {
+                // Grab a lock on stderr so that we can avoid the possibility of lines blurring
+                // together in confusing ways.
+                let stderr = StandardStream::stderr(ColorChoice::Always);
+                let mut handle = stderr.lock();
+                handle
+                    .write_all(&format!("\ntest lang_tests::{} ... ", test_name).as_bytes())
+                    .ok();
+                if failure
+                    != (TestFailure {
+                        status: None,
+                        stderr: None,
+                        stdout: None,
+                    })
+                {
+                    let mut failures = failures.lock().unwrap();
+                    failures.push((test_name, failure));
+                    handle
+                        .set_color(ColorSpec::new().set_fg(Some(Color::Red)))
+                        .ok();
+                    handle.write_all("FAILED".as_bytes()).ok();
+                    handle.reset().ok();
+                } else {
+                    handle
+                        .set_color(ColorSpec::new().set_fg(Some(Color::Green)))
+                        .ok();
+                    handle.write_all("ok".as_bytes()).ok();
+                    handle.reset().ok();
+                }
+            }
+        });
+    }
+    pool.join();
+    let failures = Mutex::into_inner(Arc::try_unwrap(failures).unwrap()).unwrap();
+
+    (failures, num_ignored)
 }
