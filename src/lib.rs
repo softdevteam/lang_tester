@@ -86,8 +86,10 @@
 //!
 //! Tests use a two-level indentation syntax: the outer most level of indentation defines a command
 //! name (multiple command names can be specified, as in the above); each command name can then
-//! define tests for one or more of `status: <success|failure>`, `stderr: [<string>]`, `stdout:
-//! [<string>]`.
+//! define tests for one or more of `status: <success|failure|<int>>` (where `success` and
+//! `failure` map to platform specific notions of a command completing successfully or
+//! unsuccessfully respectively and `<int>` is a signed integer checking for a specific exit code,
+//! on platforms that support it), `stderr: [<string>]`, `stdout: [<string>]`.
 //!
 //! In essence, each keyword under a command name is a test for that command. The above file
 //! contains 4 tests: the `Compiler` should succeed (e.g. return a `0` exit code when run on Unix),

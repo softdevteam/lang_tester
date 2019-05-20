@@ -215,13 +215,27 @@ impl<'a> LangTester<'a> {
                 };
                 let mut meant_to_error = false;
                 if let Some(ref status) = test.status {
-                    if status == "error" {
-                        meant_to_error = true;
-                    }
-                    if output.status.success() && status == "error" {
-                        failure.status = Some("Success".to_owned());
-                    } else if !output.status.success() && status == "success" {
-                        failure.status = Some("Error".to_owned());
+                    match status {
+                        Status::Success => {
+                            if !output.status.success() {
+                                failure.status = Some("Error".to_owned());
+                            }
+                        }
+                        Status::Error => {
+                            meant_to_error = true;
+                            if output.status.success() {
+                                failure.status = Some("Success".to_owned());
+                            }
+                        }
+                        Status::Int(i) => {
+                            let code = output.status.code();
+                            if code != Some(*i) {
+                                failure.status = Some(
+                                    code.map(|x| x.to_string())
+                                        .unwrap_or_else(|| "Exited due to signal".to_owned()),
+                                );
+                            }
+                        }
                     }
                 }
                 if let Some(ref stderr) = test.stderr {
@@ -321,10 +335,24 @@ impl<'a> LangTester<'a> {
     }
 }
 
+/// The status of an executed command.
+#[derive(Debug)]
+pub(crate) enum Status {
+    /// The command exited successfully (by whatever definition of "successful" the running
+    /// platform uses).
+    Success,
+    /// The command did not execute successfully (by whatever definition of "not successful" the
+    /// running platform uses).
+    Error,
+    /// The command exited with a precise exit code. This option may not be available on all
+    /// platforms.
+    Int(i32),
+}
+
 /// A user `Test`.
 #[derive(Debug)]
 pub(crate) struct Test<'a> {
-    pub status: Option<String>,
+    pub status: Option<Status>,
     pub stderr: Option<Vec<&'a str>>,
     pub stdout: Option<Vec<&'a str>>,
 }
