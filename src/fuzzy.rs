@@ -26,10 +26,10 @@ pub(crate) fn match_vec(plines: &[&str], s: &str) -> bool {
             if plines[pi] == WILDCARD {
                 panic!("Can't have '{}' on two consecutive lines.", WILDCARD);
             }
-            while si < slines.len() && !match_line(plines[pi], slines[si]) {
+            while si < slines.len() && !match_line(&plines[pi], slines[si]) {
                 si += 1;
             }
-        } else if match_line(plines[pi], slines[si]) {
+        } else if match_line(&plines[pi], slines[si]) {
             pi += 1;
             si += 1;
         } else {

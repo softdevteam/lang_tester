@@ -14,22 +14,35 @@ use std::{
     io::{self, Write},
     path::{Path, PathBuf},
     process::{self, Command},
+    sync::{Arc, Mutex},
 };
 
 use getopts::Options;
+use num_cpus;
 use termcolor::{Color, ColorChoice, ColorSpec, StandardStream, WriteColor};
+use threadpool::ThreadPool;
 use walkdir::WalkDir;
 
 use crate::{fuzzy, parser::parse_tests};
 
 pub struct LangTester<'a> {
     test_dir: Option<&'a str>,
-    test_file_filter: Option<Box<Fn(&Path) -> bool>>,
-    test_extract: Option<Box<Fn(&str) -> Option<String>>>,
-    test_cmds: Option<Box<Fn(&Path) -> Vec<(&str, Command)>>>,
     use_cmdline_args: bool,
+    test_file_filter: Option<Box<Fn(&Path) -> bool>>,
     cmdline_filters: Option<Vec<String>>,
+    inner: Arc<LangTesterPooler>,
 }
+
+/// This is the information shared across test threads and which needs to be hidden behind an
+/// `Arc`.
+struct LangTesterPooler {
+    test_extract: Option<Box<Fn(&str) -> Option<String> + Send>>,
+    test_cmds: Option<Box<Fn(&Path) -> Vec<(&str, Command)> + Send>>,
+}
+
+// `LangTestInner` isn't `Sync` because of the presence of `Command` in a function signature. Since
+// this is clearly safe (we're not syncing `Command`s, but function references), we are OK.
+unsafe impl Sync for LangTesterPooler {}
 
 impl<'a> LangTester<'a> {
     /// Create a new `LangTester` with default options. Note that, at a minimum, you need to call
@@ -39,10 +52,12 @@ impl<'a> LangTester<'a> {
         LangTester {
             test_dir: None,
             test_file_filter: None,
-            test_extract: None,
-            test_cmds: None,
             use_cmdline_args: true,
             cmdline_filters: None,
+            inner: Arc::new(LangTesterPooler {
+                test_extract: None,
+                test_cmds: None,
+            }),
         }
     }
 
@@ -98,9 +113,9 @@ impl<'a> LangTester<'a> {
     /// ```
     pub fn test_extract<F>(&'a mut self, test_extract: F) -> &'a mut Self
     where
-        F: 'static + Fn(&str) -> Option<String>,
+        F: 'static + Fn(&str) -> Option<String> + Send,
     {
-        self.test_extract = Some(Box::new(test_extract));
+        Arc::get_mut(&mut self.inner).unwrap().test_extract = Some(Box::new(test_extract));
         self
     }
 
@@ -144,9 +159,9 @@ impl<'a> LangTester<'a> {
     /// ```
     pub fn test_cmds<F>(&'a mut self, test_cmds: F) -> &'a mut Self
     where
-        F: 'static + Fn(&Path) -> Vec<(&str, Command)>,
+        F: 'static + Fn(&Path) -> Vec<(&str, Command)> + Send,
     {
-        self.test_cmds = Some(Box::new(test_cmds));
+        Arc::get_mut(&mut self.inner).unwrap().test_cmds = Some(Box::new(test_cmds));
         self
     }
 
@@ -177,10 +192,10 @@ impl<'a> LangTester<'a> {
         if self.test_dir.is_none() {
             panic!("test_dir must be specified.");
         }
-        if self.test_extract.is_none() {
+        if self.inner.test_extract.is_none() {
             panic!("test_extract must be specified.");
         }
-        if self.test_cmds.is_none() {
+        if self.inner.test_cmds.is_none() {
             panic!("test_cmds must be specified.");
         }
     }
@@ -240,29 +255,161 @@ impl<'a> LangTester<'a> {
         }
         let (test_files, num_filtered) = self.test_files();
         eprint!("\nrunning {} tests", test_files.len());
-        let mut failures = Vec::new();
-        let mut num_ignored = 0;
-        for p in &test_files {
-            let test_name = p.file_stem().unwrap().to_str().unwrap();
-            eprint!("\ntest lang_tests::{} ... ", test_name);
-            let all_str = read_to_string(p.as_path())
-                .unwrap_or_else(|_| panic!(format!("Couldn't read {}", test_name)));
-            let test_str = self.test_extract.as_ref().unwrap()(&all_str).unwrap_or_else(|| {
-                panic!(format!("Couldn't extract test string from {}", test_name))
-            });
+        let test_files_len = test_files.len();
+        let (failures, num_ignored) = run_tests(test_files, Arc::clone(&self.inner));
+
+        self.pp_failures(&failures, test_files_len, num_ignored, num_filtered);
+
+        if !failures.is_empty() {
+            process::exit(1);
+        }
+    }
+
+    /// Pretty print any failures to `stderr`.
+    fn pp_failures(
+        &self,
+        failures: &Vec<(String, TestFailure)>,
+        test_files_len: usize,
+        num_ignored: usize,
+        num_filtered: usize,
+    ) {
+        if !failures.is_empty() {
+            eprintln!("\n\nfailures:");
+            for (test_name, test) in failures {
+                if let Some(ref status) = test.status {
+                    eprintln!("\n---- lang_tests::{} status ----\n{}", test_name, status);
+                }
+                if let Some(ref stderr) = test.stderr {
+                    eprintln!("\n---- lang_tests::{} stderr ----\n{}\n", test_name, stderr);
+                }
+                if let Some(ref stdout) = test.stdout {
+                    eprintln!("\n---- lang_tests::{} stdout ----\n{}\n", test_name, stdout);
+                }
+            }
+            eprintln!("\nfailures:");
+            for (test_name, _) in failures {
+                eprint!("    lang_tests::{}", test_name);
+            }
+        }
+
+        eprint!("\n\ntest result: ");
+        if failures.is_empty() {
+            write_with_colour("ok", Color::Green);
+        } else {
+            write_with_colour("FAILED", Color::Red);
+        }
+        eprintln!(
+            ". {} passed; {} failed; {} ignored; 0 measured; {} filtered out\n",
+            test_files_len - failures.len(),
+            failures.len(),
+            num_ignored,
+            num_filtered
+        );
+    }
+}
+
+/// The status of an executed command.
+#[derive(Clone, Debug)]
+pub(crate) enum Status {
+    /// The command exited successfully (by whatever definition of "successful" the running
+    /// platform uses).
+    Success,
+    /// The command did not execute successfully (by whatever definition of "not successful" the
+    /// running platform uses).
+    Error,
+    /// The command exited with a precise exit code. This option may not be available on all
+    /// platforms.
+    Int(i32),
+}
+
+/// A user `Test`.
+#[derive(Clone, Debug)]
+pub(crate) struct Test<'a> {
+    pub status: Option<Status>,
+    pub stderr: Option<Vec<&'a str>>,
+    pub stdout: Option<Vec<&'a str>>,
+}
+
+/// If a test fails, the parts that fail are set to `Some(...)` in an instance of this struct.
+#[derive(Debug, PartialEq)]
+struct TestFailure {
+    status: Option<String>,
+    stderr: Option<String>,
+    stdout: Option<String>,
+}
+
+fn write_with_colour(s: &str, colour: Color) {
+    let mut stderr = StandardStream::stderr(ColorChoice::Always);
+    stderr.set_color(ColorSpec::new().set_fg(Some(colour))).ok();
+    io::stderr().write_all(s.as_bytes()).ok();
+    stderr.reset().ok();
+}
+
+fn usage() -> ! {
+    eprintln!("Usage: <filter1> [... <filtern>]");
+    process::exit(1);
+}
+
+/// Check for the case where the user has a test called `X` but `test_cmds` doesn't have a command
+/// with a matching name. This is almost certainly a bug, in the sense that the test can never,
+/// ever fire.
+fn check_names<'a>(cmd_pairs: &[(String, Command)], tests: &HashMap<String, Test<'a>>) {
+    let cmd_names = cmd_pairs.iter().map(|x| &x.0).collect::<HashSet<_>>();
+    let test_names = tests.keys().map(|x| x).collect::<HashSet<_>>();
+    let diff = test_names
+        .difference(&cmd_names)
+        .map(|x| x.as_str())
+        .collect::<Vec<_>>();
+    if !diff.is_empty() {
+        panic!(
+            "Command name(s) '{}' in tests are not found in the actual commands.",
+            diff.join(", ")
+        );
+    }
+}
+
+/// Run every test in `test_files`, returning a tuple `(failures, num_ignored)`.
+fn run_tests(
+    test_files: Vec<PathBuf>,
+    inner: Arc<LangTesterPooler>,
+) -> (Vec<(String, TestFailure)>, usize) {
+    let failures = Arc::new(Mutex::new(Vec::new()));
+    let mut num_ignored = 0;
+    let pool = ThreadPool::new(num_cpus::get());
+    for p in test_files {
+        let test_name = p.file_stem().unwrap().to_str().unwrap().to_owned();
+
+        let failures = failures.clone();
+        let inner = inner.clone();
+        pool.execute(move || {
+            let all_str =
+                read_to_string(p.as_path()).expect(&format!("Couldn't read {}", test_name));
+            let test_str = inner.test_extract.as_ref().unwrap()(&all_str)
+                .expect(&format!("Couldn't extract test string from {}", test_name));
             if test_str.is_empty() {
-                write_with_colour("ignored", Color::Yellow);
-                eprint!(" (test string is empty)");
+                // Grab a lock on stderr so that we can avoid the possibility of lines blurring
+                // together in confusing ways.
+                let stderr = StandardStream::stderr(ColorChoice::Always);
+                let mut handle = stderr.lock();
+                handle
+                    .write_all(&format!("\ntest lang_tests::{} ... ", test_name).as_bytes())
+                    .ok();
+                handle
+                    .set_color(ColorSpec::new().set_fg(Some(Color::Yellow)))
+                    .ok();
+                handle.write_all("ignored".as_bytes()).ok();
+                handle.reset().ok();
+                handle.write_all(" (test string is empty)".as_bytes()).ok();
                 num_ignored += 1;
-                continue;
+                return;
             }
 
             let tests = parse_tests(&test_str);
-            let cmd_pairs = self.test_cmds.as_mut().unwrap()(p.as_path())
+            let cmd_pairs = inner.test_cmds.as_ref().unwrap()(p.as_path())
                 .into_iter()
                 .map(|(test_name, cmd)| (test_name.to_lowercase(), cmd))
                 .collect::<Vec<_>>();
-            self.check_names(&cmd_pairs, &tests);
+            check_names(&cmd_pairs, &tests);
 
             let mut failure = TestFailure {
                 status: None,
@@ -272,7 +419,7 @@ impl<'a> LangTester<'a> {
             for (cmd_name, mut cmd) in cmd_pairs {
                 let output = cmd
                     .output()
-                    .unwrap_or_else(|_| panic!(format!("Couldn't run command {:?}.", cmd)));
+                    .expect(&format!("Couldn't run command {:?}.", cmd));
 
                 let test = match tests.get(&cmd_name) {
                     Some(t) => t,
@@ -320,134 +467,40 @@ impl<'a> LangTester<'a> {
                 }
             }
 
-            if failure
-                != (TestFailure {
-                    status: None,
-                    stderr: None,
-                    stdout: None,
-                })
             {
-                failures.push((test_name, failure));
-                output_failed();
-            } else {
-                output_ok();
-            }
-        }
-
-        self.pp_failures(&failures, test_files.len(), num_ignored, num_filtered);
-
-        if !failures.is_empty() {
-            process::exit(1);
-        }
-    }
-
-    /// Check for the case where the user has a test called `X` but `test_cmds` doesn't have a
-    /// command with a matching name. This is almost certainly a bug, in the sense that the test
-    /// can never, ever fire.
-    fn check_names(&self, cmd_pairs: &[(String, Command)], tests: &HashMap<String, Test>) {
-        let cmd_names = cmd_pairs.iter().map(|x| &x.0).collect::<HashSet<_>>();
-        let test_names = tests.keys().map(|x| x).collect::<HashSet<_>>();
-        let diff = test_names
-            .difference(&cmd_names)
-            .map(|x| x.as_str())
-            .collect::<Vec<_>>();
-        if !diff.is_empty() {
-            panic!(
-                "Command name(s) '{}' in tests are not found in the actual commands.",
-                diff.join(", ")
-            );
-        }
-    }
-
-    /// Pretty print any failures to `stderr`.
-    fn pp_failures(
-        &self,
-        failures: &[(&str, TestFailure)],
-        test_files_len: usize,
-        num_ignored: usize,
-        num_filtered: usize,
-    ) {
-        if !failures.is_empty() {
-            eprintln!("\n\nfailures:");
-            for (test_name, test) in failures {
-                if let Some(ref status) = test.status {
-                    eprintln!("\n---- lang_tests::{} status ----\n{}", test_name, status);
-                }
-                if let Some(ref stderr) = test.stderr {
-                    eprintln!("\n---- lang_tests::{} stderr ----\n{}\n", test_name, stderr);
-                }
-                if let Some(ref stdout) = test.stdout {
-                    eprintln!("\n---- lang_tests::{} stdout ----\n{}\n", test_name, stdout);
+                // Grab a lock on stderr so that we can avoid the possibility of lines blurring
+                // together in confusing ways.
+                let stderr = StandardStream::stderr(ColorChoice::Always);
+                let mut handle = stderr.lock();
+                handle
+                    .write_all(&format!("\ntest lang_tests::{} ... ", test_name).as_bytes())
+                    .ok();
+                if failure
+                    != (TestFailure {
+                        status: None,
+                        stderr: None,
+                        stdout: None,
+                    })
+                {
+                    let mut failures = failures.lock().unwrap();
+                    failures.push((test_name, failure));
+                    handle
+                        .set_color(ColorSpec::new().set_fg(Some(Color::Red)))
+                        .ok();
+                    handle.write_all("FAILED".as_bytes()).ok();
+                    handle.reset().ok();
+                } else {
+                    handle
+                        .set_color(ColorSpec::new().set_fg(Some(Color::Green)))
+                        .ok();
+                    handle.write_all("ok".as_bytes()).ok();
+                    handle.reset().ok();
                 }
             }
-            eprintln!("\nfailures:");
-            for (test_name, _) in failures {
-                eprint!("    lang_tests::{}", test_name);
-            }
-        }
-
-        eprint!("\n\ntest result: ");
-        if failures.is_empty() {
-            output_ok();
-        } else {
-            output_failed();
-        }
-        eprintln!(
-            ". {} passed; {} failed; {} ignored; 0 measured; {} filtered out\n",
-            test_files_len - failures.len(),
-            failures.len(),
-            num_ignored,
-            num_filtered
-        );
+        });
     }
-}
+    pool.join();
+    let failures = Mutex::into_inner(Arc::try_unwrap(failures).unwrap()).unwrap();
 
-/// The status of an executed command.
-#[derive(Debug)]
-pub(crate) enum Status {
-    /// The command exited successfully (by whatever definition of "successful" the running
-    /// platform uses).
-    Success,
-    /// The command did not execute successfully (by whatever definition of "not successful" the
-    /// running platform uses).
-    Error,
-    /// The command exited with a precise exit code. This option may not be available on all
-    /// platforms.
-    Int(i32),
-}
-
-/// A user `Test`.
-#[derive(Debug)]
-pub(crate) struct Test<'a> {
-    pub status: Option<Status>,
-    pub stderr: Option<Vec<&'a str>>,
-    pub stdout: Option<Vec<&'a str>>,
-}
-
-/// If a test fails, the parts that fail are set to `Some(...)` in an instance of this struct.
-#[derive(Debug, PartialEq)]
-struct TestFailure {
-    status: Option<String>,
-    stderr: Option<String>,
-    stdout: Option<String>,
-}
-
-fn write_with_colour(s: &str, colour: Color) {
-    let mut stderr = StandardStream::stderr(ColorChoice::Always);
-    stderr.set_color(ColorSpec::new().set_fg(Some(colour))).ok();
-    io::stderr().write_all(s.as_bytes()).ok();
-    stderr.reset().ok();
-}
-
-fn output_failed() {
-    write_with_colour("FAILED", Color::Red);
-}
-
-fn output_ok() {
-    write_with_colour("ok", Color::Green);
-}
-
-fn usage() -> ! {
-    eprintln!("Usage: <filter1> [... <filtern>]");
-    process::exit(1);
+    (failures, num_ignored)
 }

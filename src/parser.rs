@@ -12,7 +12,7 @@ use std::collections::hash_map::{Entry, HashMap};
 use crate::tester::{Status, Test};
 
 /// Parse test input into a set of `Test`s.
-pub(crate) fn parse_tests<'a>(test_str: &'a str) -> HashMap<String, Test<'a>> {
+pub(crate) fn parse_tests(test_str: &str) -> HashMap<String, Test> {
     let lines = test_str.lines().collect::<Vec<_>>();
     let mut tests = HashMap::new();
     let mut line_off = 0;
