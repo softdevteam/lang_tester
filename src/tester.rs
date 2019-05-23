@@ -36,13 +36,9 @@ pub struct LangTester<'a> {
 /// This is the information shared across test threads and which needs to be hidden behind an
 /// `Arc`.
 struct LangTesterPooler {
-    test_extract: Option<Box<Fn(&str) -> Option<String> + Send>>,
-    test_cmds: Option<Box<Fn(&Path) -> Vec<(&str, Command)> + Send>>,
+    test_extract: Option<Box<Fn(&str) -> Option<String> + Send + Sync>>,
+    test_cmds: Option<Box<Fn(&Path) -> Vec<(&str, Command)> + Send + Sync>>,
 }
-
-// `LangTestInner` isn't `Sync` because of the presence of `Command` in a function signature. Since
-// this is clearly safe (we're not syncing `Command`s, but function references), we are OK.
-unsafe impl Sync for LangTesterPooler {}
 
 impl<'a> LangTester<'a> {
     /// Create a new `LangTester` with default options. Note that, at a minimum, you need to call
@@ -113,7 +109,7 @@ impl<'a> LangTester<'a> {
     /// ```
     pub fn test_extract<F>(&'a mut self, test_extract: F) -> &'a mut Self
     where
-        F: 'static + Fn(&str) -> Option<String> + Send,
+        F: 'static + Fn(&str) -> Option<String> + Send + Sync,
     {
         Arc::get_mut(&mut self.inner).unwrap().test_extract = Some(Box::new(test_extract));
         self
@@ -159,7 +155,7 @@ impl<'a> LangTester<'a> {
     /// ```
     pub fn test_cmds<F>(&'a mut self, test_cmds: F) -> &'a mut Self
     where
-        F: 'static + Fn(&Path) -> Vec<(&str, Command)> + Send,
+        F: 'static + Fn(&Path) -> Vec<(&str, Command)> + Send + Sync,
     {
         Arc::get_mut(&mut self.inner).unwrap().test_cmds = Some(Box::new(test_cmds));
         self
