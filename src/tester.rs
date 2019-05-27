@@ -23,7 +23,7 @@ use termcolor::{Color, ColorChoice, ColorSpec, StandardStream, WriteColor};
 use threadpool::ThreadPool;
 use walkdir::WalkDir;
 
-use crate::{fuzzy, parser::parse_tests};
+use crate::{fatal, fuzzy, parser::parse_tests};
 
 pub struct LangTester<'a> {
     test_dir: Option<&'a str>,
@@ -186,13 +186,13 @@ impl<'a> LangTester<'a> {
     /// Make sure the user has specified the minimum set of things we need from them.
     fn validate(&self) {
         if self.test_dir.is_none() {
-            panic!("test_dir must be specified.");
+            fatal("test_dir must be specified.");
         }
         if self.inner.test_extract.is_none() {
-            panic!("test_extract must be specified.");
+            fatal("test_extract must be specified.");
         }
         if self.inner.test_cmds.is_none() {
-            panic!("test_cmds must be specified.");
+            fatal("test_cmds must be specified.");
         }
     }
 
@@ -357,10 +357,10 @@ fn check_names<'a>(cmd_pairs: &[(String, Command)], tests: &HashMap<String, Test
         .map(|x| x.as_str())
         .collect::<Vec<_>>();
     if !diff.is_empty() {
-        panic!(
+        fatal(&format!(
             "Command name(s) '{}' in tests are not found in the actual commands.",
             diff.join(", ")
-        );
+        ));
     }
 }
 
@@ -378,10 +378,11 @@ fn run_tests(
         let failures = failures.clone();
         let inner = inner.clone();
         pool.execute(move || {
-            let all_str =
-                read_to_string(p.as_path()).expect(&format!("Couldn't read {}", test_name));
-            let test_str = inner.test_extract.as_ref().unwrap()(&all_str)
-                .expect(&format!("Couldn't extract test string from {}", test_name));
+            let all_str = read_to_string(p.as_path())
+                .unwrap_or_else(|_| fatal(&format!("Couldn't read {}", test_name)));
+            let test_str = inner.test_extract.as_ref().unwrap()(&all_str).unwrap_or_else(|| {
+                fatal(&format!("Couldn't extract test string from {}", test_name))
+            });
             if test_str.is_empty() {
                 // Grab a lock on stderr so that we can avoid the possibility of lines blurring
                 // together in confusing ways.
@@ -415,7 +416,7 @@ fn run_tests(
             for (cmd_name, mut cmd) in cmd_pairs {
                 let output = cmd
                     .output()
-                    .expect(&format!("Couldn't run command {:?}.", cmd));
+                    .unwrap_or_else(|_| fatal(&format!("Couldn't run command {:?}.", cmd)));
 
                 let test = match tests.get(&cmd_name) {
                     Some(t) => t,

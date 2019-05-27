@@ -160,3 +160,8 @@ mod parser;
 mod tester;
 
 pub use tester::LangTester;
+
+pub(crate) fn fatal(msg: &str) -> ! {
+    eprintln!("\nFatal exception:\n  {}", msg);
+    std::process::exit(1);
+}

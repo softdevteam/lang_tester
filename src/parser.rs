@@ -9,7 +9,10 @@
 
 use std::collections::hash_map::{Entry, HashMap};
 
-use crate::tester::{Status, Test};
+use crate::{
+    fatal,
+    tester::{Status, Test},
+};
 
 /// Parse test input into a set of `Test`s.
 pub(crate) fn parse_tests(test_str: &str) -> HashMap<String, Test> {
@@ -24,16 +27,16 @@ pub(crate) fn parse_tests(test_str: &str) -> HashMap<String, Test> {
         }
         let (test_name, val) = key_val(&lines, line_off, indent);
         if !val.is_empty() {
-            panic!(
+            fatal(&format!(
                 "Test name '{}' can't have a value on line {}.",
                 test_name, line_off
-            );
+            ));
         }
         match tests.entry(test_name.to_lowercase()) {
-            Entry::Occupied(_) => panic!(
+            Entry::Occupied(_) => fatal(&format!(
                 "Command name '{}' is specified more than once, line {}.",
                 test_name, line_off
-            ),
+            )),
             Entry::Vacant(e) => {
                 line_off += 1;
                 let mut test = Test {
@@ -62,7 +65,10 @@ pub(crate) fn parse_tests(test_str: &str) -> HashMap<String, Test> {
                                     if let Ok(i) = x.parse::<i32>() {
                                         Status::Int(i)
                                     } else {
-                                        panic!("Unknown status '{}' on line {}", val_str, line_off);
+                                        fatal(&format!(
+                                            "Unknown status '{}' on line {}",
+                                            val_str, line_off
+                                        ));
                                     }
                                 }
                             };
@@ -74,7 +80,7 @@ pub(crate) fn parse_tests(test_str: &str) -> HashMap<String, Test> {
                         "stdout" => {
                             test.stdout = Some(val);
                         }
-                        _ => panic!("Unknown key '{}' on line {}.", key, line_off),
+                        _ => fatal(&format!("Unknown key '{}' on line {}.", key, line_off)),
                     }
                 }
                 e.insert(test);
@@ -106,7 +112,10 @@ fn key_val<'a>(lines: &[&'a str], line_off: usize, indent: usize) -> (&'a str, &
         .count();
     match line[content_start..].chars().nth(0) {
         Some(':') => content_start += ':'.len_utf8(),
-        _ => panic!("Invalid key terminator at line {}.\n  {}", line_off, line),
+        _ => fatal(&format!(
+            "Invalid key terminator at line {}.\n  {}",
+            line_off, line
+        )),
     }
     content_start += line[content_start..]
         .chars()
@@ -152,7 +161,7 @@ fn key_multiline_val<'a>(
     // Remove leading empty strings
     val.drain(0..val.iter().position(|x| !x.is_empty()).unwrap_or(0));
     if val.is_empty() {
-        panic!("Key without value at line {}", orig_line_off);
+        fatal(&format!("Key without value at line {}", orig_line_off));
     }
     (line_off, key, val)
 }
