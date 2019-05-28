@@ -7,6 +7,8 @@
 // at your option. This file may not be copied, modified, or distributed except according to those
 // terms.
 
+use crate::fatal;
+
 const WILDCARD: &str = "...";
 
 /// Does `s` conform to the fuzzy pattern `pattern`? Note that `plines` is expected not to start or
@@ -24,7 +26,10 @@ pub(crate) fn match_vec(plines: &[&str], s: &str) -> bool {
                 return true;
             }
             if plines[pi] == WILDCARD {
-                panic!("Can't have '{}' on two consecutive lines.", WILDCARD);
+                fatal(&format!(
+                    "Can't have '{}' on two consecutive lines.",
+                    WILDCARD
+                ));
             }
             while si < slines.len() && !match_line(&plines[pi], slines[si]) {
                 si += 1;
