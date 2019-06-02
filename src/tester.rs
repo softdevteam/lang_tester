@@ -483,8 +483,13 @@ fn run_tests(
                     if pass_stdout.is_none() || pass_stdout == Some(false) {
                         failure.stdout = Some(stdout_utf8);
                     }
+
+                    // If a sub-test failed, bail out immediately, otherwise subsequent sub-tests
+                    // will overwrite the failure output!
+                    break;
                 }
 
+                // If a command failed, and we weren't expecting it to, bail out immediately.
                 if !output.status.success() && meant_to_error {
                     break;
                 }
