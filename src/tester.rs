@@ -393,6 +393,9 @@ fn run_tests(
         let failures = failures.clone();
         let inner = inner.clone();
         pool.execute(move || {
+            if inner.test_threads == 1 {
+                eprint!("\ntest lang_test::{} ... ", test_name);
+            }
             let all_str = read_to_string(p.as_path())
                 .unwrap_or_else(|_| fatal(&format!("Couldn't read {}", test_name)));
             let test_str = inner.test_extract.as_ref().unwrap()(&all_str).unwrap_or_else(|| {
@@ -403,9 +406,11 @@ fn run_tests(
                 // together in confusing ways.
                 let stderr = StandardStream::stderr(ColorChoice::Always);
                 let mut handle = stderr.lock();
-                handle
-                    .write_all(&format!("\ntest lang_tests::{} ... ", test_name).as_bytes())
-                    .ok();
+                if inner.test_threads > 1 {
+                    handle
+                        .write_all(&format!("\ntest lang_tests::{} ... ", test_name).as_bytes())
+                        .ok();
+                }
                 handle
                     .set_color(ColorSpec::new().set_fg(Some(Color::Yellow)))
                     .ok();
@@ -510,9 +515,11 @@ fn run_tests(
                 // together in confusing ways.
                 let stderr = StandardStream::stderr(ColorChoice::Always);
                 let mut handle = stderr.lock();
-                handle
-                    .write_all(&format!("\ntest lang_tests::{} ... ", test_name).as_bytes())
-                    .ok();
+                if inner.test_threads > 1 {
+                    handle
+                        .write_all(&format!("\ntest lang_tests::{} ... ", test_name).as_bytes())
+                        .ok();
+                }
                 if failure
                     != (TestFailure {
                         status: None,
