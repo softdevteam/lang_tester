@@ -36,6 +36,7 @@ pub struct LangTester<'a> {
 /// This is the information shared across test threads and which needs to be hidden behind an
 /// `Arc`.
 struct LangTesterPooler {
+    test_threads: usize,
     test_extract: Option<Box<Fn(&str) -> Option<String> + Send + Sync>>,
     test_cmds: Option<Box<Fn(&Path) -> Vec<(&str, Command)> + Send + Sync>>,
 }
@@ -51,6 +52,7 @@ impl<'a> LangTester<'a> {
             use_cmdline_args: true,
             cmdline_filters: None,
             inner: Arc::new(LangTesterPooler {
+                test_threads: num_cpus::get(),
                 test_extract: None,
                 test_cmds: None,
             }),
@@ -240,10 +242,23 @@ impl<'a> LangTester<'a> {
             let args: Vec<String> = env::args().collect();
             let matches = Options::new()
                 .optflag("h", "help", "")
+                .optopt(
+                    "",
+                    "test-threads",
+                    "Number of threads used for running tests in parallel",
+                    "n_threads",
+                )
                 .parse(&args[1..])
                 .unwrap_or_else(|_| usage());
             if matches.opt_present("h") {
                 usage();
+            }
+            if let Some(s) = matches.opt_str("test-threads") {
+                let test_threads = s.parse::<usize>().unwrap_or_else(|_| usage());
+                if test_threads == 0 {
+                    fatal("Must specify more than 0 threads.");
+                }
+                Arc::get_mut(&mut self.inner).unwrap().test_threads = test_threads;
             }
             if !matches.free.is_empty() {
                 self.cmdline_filters = Some(matches.free);
@@ -342,7 +357,7 @@ fn write_with_colour(s: &str, colour: Color) {
 }
 
 fn usage() -> ! {
-    eprintln!("Usage: <filter1> [... <filtern>]");
+    eprintln!("Usage: [--test-threads=<n>] <filter1> [... <filtern>]");
     process::exit(1);
 }
 
@@ -371,7 +386,7 @@ fn run_tests(
 ) -> (Vec<(String, TestFailure)>, usize) {
     let failures = Arc::new(Mutex::new(Vec::new()));
     let mut num_ignored = 0;
-    let pool = ThreadPool::new(num_cpus::get());
+    let pool = ThreadPool::new(inner.test_threads);
     for p in test_files {
         let test_name = p.file_stem().unwrap().to_str().unwrap().to_owned();
 
