@@ -20,6 +20,7 @@ getopts = "0.2"
 num_cpus = "1.10"
 termcolor = "1.0"
 threadpool = "1.7"
+wait-timeout = "0.2"
 walkdir = "2"
 
 [dev-dependencies]

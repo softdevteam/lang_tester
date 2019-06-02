@@ -15,15 +15,19 @@ use std::{
     path::{Path, PathBuf},
     process::{self, Command},
     sync::{Arc, Mutex},
+    time::Duration,
 };
 
 use getopts::Options;
 use num_cpus;
 use termcolor::{Color, ColorChoice, ColorSpec, StandardStream, WriteColor};
 use threadpool::ThreadPool;
+use wait_timeout::ChildExt;
 use walkdir::WalkDir;
 
 use crate::{fatal, fuzzy, parser::parse_tests};
+
+const TIMEOUT: u64 = 60; // seconds
 
 pub struct LangTester<'a> {
     test_dir: Option<&'a str>,
@@ -437,9 +441,30 @@ fn run_tests(
                 let mut pass_status = None;
                 let mut pass_stderr = None;
                 let mut pass_stdout = None;
-                let output = cmd
-                    .output()
+                let mut child = cmd
+                    .stderr(process::Stdio::piped())
+                    .stdout(process::Stdio::piped())
+                    .spawn()
                     .unwrap_or_else(|_| fatal(&format!("Couldn't run command {:?}.", cmd)));
+                let mut looped = 1;
+                loop {
+                    match child.wait_timeout(Duration::from_secs(TIMEOUT)).unwrap() {
+                        Some(_) => break,
+                        None => {
+                            if inner.test_threads == 1 {
+                                eprint!("running for over {} seconds... ", TIMEOUT * looped);
+                            } else {
+                                eprintln!(
+                                    "\nlang_tests::{} ... has been running for over {} seconds",
+                                    test_name,
+                                    TIMEOUT * looped
+                                );
+                            }
+                        }
+                    };
+                    looped += 1;
+                }
+                let output = child.wait_with_output().unwrap();
 
                 let test = match tests.get(&cmd_name) {
                     Some(t) => t,
