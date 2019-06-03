@@ -24,9 +24,9 @@ fn main() {
     let tempdir = TempDir::new("rust_lang_tester").unwrap();
     LangTester::new()
         .test_dir("examples/rust_lang_tester/lang_tests")
-        // Only use files named `*.rs` as tests.
+        // Only use files named `*.rs` as test files.
         .test_file_filter(|p| p.extension().unwrap().to_str().unwrap() == "rs")
-        // Extract the first sequence of commented line(s) as the test.
+        // Extract the first sequence of commented line(s) as the tests.
         .test_extract(|s| {
             Some(
                 s.lines()

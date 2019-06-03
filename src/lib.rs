@@ -28,9 +28,9 @@
 //!     let tempdir = TempDir::new("rust_lang_tester").unwrap();
 //!     LangTester::new()
 //!         .test_dir("examples/rust_lang_tester/lang_tests")
-//!         // Only use files named `*.rs` as tests.
+//!         // Only use files named `*.rs` as test files.
 //!         .test_file_filter(|p| p.extension().unwrap().to_str().unwrap() == "rs")
-//!         // Extract the first sequence of commented line(s) as the test.
+//!         // Extract the first sequence of commented line(s) as the tests.
 //!         .test_extract(|s| {
 //!             Some(
 //!                 s.lines()
@@ -62,10 +62,11 @@
 //! }
 //! ```
 //!
-//! This defines a lang tester that uses all `*.rs` files in a given directory as tests, running
-//! two commands against them: `Compiler` (i.e. `rustc`); and `Run-time` (the compiled binary).
+//! This defines a lang tester that uses all `*.rs` files in a given directory as test files,
+//! running two test commands against them: `Compiler` (i.e. `rustc`); and `Run-time` (the compiled
+//! binary).
 //!
-//! Users can then write files with tests and their inputs such as the following:
+//! Users can then write test files such as the following:
 //!
 //! ```rust,ignore
 //! // Compiler:
@@ -84,26 +85,27 @@
 //! }
 //! ```
 //!
-//! Tests use a two-level indentation syntax: the outer most level of indentation defines a command
-//! name (multiple command names can be specified, as in the above); each command name can then
-//! define tests for one or more of `status: <success|failure|<int>>` (where `success` and
-//! `failure` map to platform specific notions of a command completing successfully or
-//! unsuccessfully respectively and `<int>` is a signed integer checking for a specific exit code,
-//! on platforms that support it), `stderr: [<string>]`, `stdout: [<string>]`.
+//! Test data is specified with a two-level indentation syntax: the outer most level of indentation
+//! defines a test command (multiple command names can be specified, as in the above); each test
+//! command can then define sub-tests for one or more of:
 //!
-//! In essence, each keyword under a command name is a test for that command. The above file
-//! contains 4 tests: the `Compiler` should succeed (e.g. return a `0` exit code when run on Unix),
-//! and its `stderr` output should warn about an unused variable on line 12; and the resulting
-//! binary should succeed and produce `Hello world` on `stdout`.
+//!   * `status: <success|failure|<int>>`, where `success` and `failure` map to platform specific
+//!      notions of a command completing successfully or unsuccessfully respectively and `<int>` is
+//!      a signed integer checking for a specific exit code on platforms that support it.
+//!   * `stderr: [<string>]`, `stdout: [<string>]` are matched strings against a command's `stderr`
+//!     or `stdout`. The special string `...` can be used as a simple wildcard: if a line consists
+//!     solely of `...`, it means "match zero or more lines"; if a line begins with `...`, it means
+//!     "match the remainder of the line only"; if a line ends with `...`, it means "match the
+//!     start of the line only". A line may start and end with `...`. Note that `stderr`/`stdout`
+//!     matches ignore leading/trailing whitespace and newlines, but are case sensitive.
 //!
-//! Lines not mentioned are not tested: for example, the above file does not state whether the
-//! `Compiler`s `stdout` should have content or not (but note that the line `stdout:` on its own
-//! would state that the `Compiler` should have no content at all). `stderr`/`stdout` tests can use
-//! `...` as a simple wildcard: if a line consists solely of `...`, it means "match zero or
-//! more lines"; if a line begins with `...`, it means "match the remainder of the line only";
-//! if a line ends with `...`, it means "match the start of the line only". A line may start and
-//! end with `...`. `stderr`/`stdout` matches ignore leading/trailing whitespace and newlines, but
-//! are case sensitive.
+//! The above file thus contains 4 actual tests: the `Compiler` should succeed (e.g. return a `0`
+//! exit code when run on Unix), and its `stderr` output should warn about an unused variable on
+//! line 12; and the resulting binary should succeed and produce `Hello world` on `stdout`.
+//!
+//! Potential sub-tests that are not mentioned are not tested: for example, the above file does not
+//! state whether the `Compiler`s `stdout` should have content or not (but note that the line
+//! `stdout:` on its own would state that the `Compiler` should have no content at all).
 //!
 //! `lang_tester`'s output is deliberately similar to Rust's normal testing output. Running the
 //! example `rust_lang_tester` in this crate produces the following output:

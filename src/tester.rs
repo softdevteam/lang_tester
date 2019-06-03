@@ -63,9 +63,9 @@ impl<'a> LangTester<'a> {
         }
     }
 
-    /// Specify the directory where tests are contained in. Note that this directory will be
+    /// Specify the directory where test files are contained. Note that this directory will be
     /// searched recursively (i.e. subdirectories and their contents will also be considered as
-    /// potential tests).
+    /// potential test files).
     pub fn test_dir(&'a mut self, test_dir: &'a str) -> &'a mut Self {
         self.test_dir = Some(test_dir);
         self
@@ -92,9 +92,9 @@ impl<'a> LangTester<'a> {
     /// Specify a function which can extract the test data for `lang_tester` from a test file. This
     /// function is passed a `&str` and must return a `String`.
     ///
-    /// How the test is extracted from the file is entirely up to the user, though a common
-    /// convention is to store the test in a comment at the beginning of the file. For example, for
-    /// Rust code one could use a function along the lines of the following:
+    /// How the test data is extracted from the test file is entirely up to the user, though a
+    /// common convention is to store the test data in a comment at the beginning of the test file.
+    /// For example, for Rust code one could use a function along the lines of the following:
     ///
     /// ```rust,ignore
     /// LangTester::new()
@@ -124,9 +124,9 @@ impl<'a> LangTester<'a> {
     /// Specify a function which takes a `Path` to a test file and returns a vector containing 1 or
     /// more `(<name>, <[Command](https://doc.rust-lang.org/std/process/struct.Command.html)>)
     /// pairs. The commands will be executed in order on the test file: for each executed command,
-    /// tests starting with `<name>` will be checked. For example, if your pipeline requires
-    /// separate compilation and linking, you might specify something along the lines of the
-    /// following:
+    /// test commands starting with `<name>` will be checked. For example, if your pipeline
+    /// requires separate compilation and linking, you might specify something along the lines of
+    /// the following:
     ///
     /// ```rust,ignore
     /// let tempdir = ...; // A `Path` to a temporary directory.
@@ -144,7 +144,7 @@ impl<'a> LangTester<'a> {
     ///     ...
     /// ```
     ///
-    /// and then have tests such as:
+    /// and then have test data such as:
     ///
     /// ```text
     /// Compiler:
@@ -290,20 +290,26 @@ impl<'a> LangTester<'a> {
     ) {
         if !failures.is_empty() {
             eprintln!("\n\nfailures:");
-            for (test_name, test) in failures {
+            for (test_fname, test) in failures {
                 if let Some(ref status) = test.status {
-                    eprintln!("\n---- lang_tests::{} status ----\n{}", test_name, status);
+                    eprintln!("\n---- lang_tests::{} status ----\n{}", test_fname, status);
                 }
                 if let Some(ref stderr) = test.stderr {
-                    eprintln!("\n---- lang_tests::{} stderr ----\n{}\n", test_name, stderr);
+                    eprintln!(
+                        "\n---- lang_tests::{} stderr ----\n{}\n",
+                        test_fname, stderr
+                    );
                 }
                 if let Some(ref stdout) = test.stdout {
-                    eprintln!("\n---- lang_tests::{} stdout ----\n{}\n", test_name, stdout);
+                    eprintln!(
+                        "\n---- lang_tests::{} stdout ----\n{}\n",
+                        test_fname, stdout
+                    );
                 }
             }
             eprintln!("\nfailures:");
-            for (test_name, _) in failures {
-                eprint!("    lang_tests::{}", test_name);
+            for (test_fname, _) in failures {
+                eprint!("    lang_tests::{}", test_fname);
             }
         }
 
@@ -337,15 +343,16 @@ pub(crate) enum Status {
     Int(i32),
 }
 
-/// A user `Test`.
+/// A user `TestCmd`.
 #[derive(Clone, Debug)]
-pub(crate) struct Test<'a> {
+pub(crate) struct TestCmd<'a> {
     pub status: Option<Status>,
     pub stderr: Option<Vec<&'a str>>,
     pub stdout: Option<Vec<&'a str>>,
 }
 
-/// If a test fails, the parts that fail are set to `Some(...)` in an instance of this struct.
+/// If one or more parts of a `TestCmd` fail, the parts that fail are set to `Some(...)` in an
+/// instance of this struct.
 #[derive(Debug, PartialEq)]
 struct TestFailure {
     status: Option<String>,
@@ -368,7 +375,7 @@ fn usage() -> ! {
 /// Check for the case where the user has a test called `X` but `test_cmds` doesn't have a command
 /// with a matching name. This is almost certainly a bug, in the sense that the test can never,
 /// ever fire.
-fn check_names<'a>(cmd_pairs: &[(String, Command)], tests: &HashMap<String, Test<'a>>) {
+fn check_names<'a>(cmd_pairs: &[(String, Command)], tests: &HashMap<String, TestCmd<'a>>) {
     let cmd_names = cmd_pairs.iter().map(|x| &x.0).collect::<HashSet<_>>();
     let test_names = tests.keys().map(|x| x).collect::<HashSet<_>>();
     let diff = test_names
@@ -392,18 +399,18 @@ fn run_tests(
     let mut num_ignored = 0;
     let pool = ThreadPool::new(inner.test_threads);
     for p in test_files {
-        let test_name = p.file_stem().unwrap().to_str().unwrap().to_owned();
+        let test_fname = p.file_stem().unwrap().to_str().unwrap().to_owned();
 
         let failures = failures.clone();
         let inner = inner.clone();
         pool.execute(move || {
             if inner.test_threads == 1 {
-                eprint!("\ntest lang_test::{} ... ", test_name);
+                eprint!("\ntest lang_test::{} ... ", test_fname);
             }
             let all_str = read_to_string(p.as_path())
-                .unwrap_or_else(|_| fatal(&format!("Couldn't read {}", test_name)));
+                .unwrap_or_else(|_| fatal(&format!("Couldn't read {}", test_fname)));
             let test_str = inner.test_extract.as_ref().unwrap()(&all_str).unwrap_or_else(|| {
-                fatal(&format!("Couldn't extract test string from {}", test_name))
+                fatal(&format!("Couldn't extract test string from {}", test_fname))
             });
             if test_str.is_empty() {
                 // Grab a lock on stderr so that we can avoid the possibility of lines blurring
@@ -412,7 +419,7 @@ fn run_tests(
                 let mut handle = stderr.lock();
                 if inner.test_threads > 1 {
                     handle
-                        .write_all(&format!("\ntest lang_tests::{} ... ", test_name).as_bytes())
+                        .write_all(&format!("\ntest lang_tests::{} ... ", test_fname).as_bytes())
                         .ok();
                 }
                 handle
@@ -456,7 +463,7 @@ fn run_tests(
                             } else {
                                 eprintln!(
                                     "\nlang_tests::{} ... has been running for over {} seconds",
-                                    test_name,
+                                    test_fname,
                                     TIMEOUT * looped
                                 );
                             }
@@ -547,7 +554,7 @@ fn run_tests(
                 let mut handle = stderr.lock();
                 if inner.test_threads > 1 {
                     handle
-                        .write_all(&format!("\ntest lang_tests::{} ... ", test_name).as_bytes())
+                        .write_all(&format!("\ntest lang_tests::{} ... ", test_fname).as_bytes())
                         .ok();
                 }
                 if failure
@@ -558,7 +565,7 @@ fn run_tests(
                     })
                 {
                     let mut failures = failures.lock().unwrap();
-                    failures.push((test_name, failure));
+                    failures.push((test_fname, failure));
                     handle
                         .set_color(ColorSpec::new().set_fg(Some(Color::Red)))
                         .ok();
