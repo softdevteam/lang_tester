@@ -1,3 +1,19 @@
+# lang_tester 0.3.1 (2019-06-04)
+
+* Add support for running a defined number of parallel processes, using the
+  `cargo test`-ish option `--test-threads=n`. For example, to run tests
+  sequentially, specify `--test-threads=1`.
+
+* Warn users if a given test has run unexpectedly long (currently every
+  multiple of 60 seconds). This is often a sign that a test has entered an
+  infinite loop.
+
+* Use better terminology in the documentation. Previously "test" was used to
+  mean a number of subtly different things which was rather confusing. Now
+  test files contain test data. Test data contains test commands. Test commands
+  contain sub-tests.
+
+
 # lang_tester 0.3.0 (2019-05-29)
 
 ## Breaking changes
