@@ -13,6 +13,10 @@
   test files contain test data. Test data contains test commands. Test commands
   contain sub-tests.
 
+* Stop testing a given test file on the first failed sub-test. Previously only
+  a test command which exited unsuccessfully caused a test file to be
+  considered as failed, causing the source of errors to sometimes be missed.
+
 
 # lang_tester 0.3.0 (2019-05-29)
 
