@@ -11,11 +11,11 @@ use std::collections::hash_map::{Entry, HashMap};
 
 use crate::{
     fatal,
-    tester::{Status, Test},
+    tester::{Status, TestCmd},
 };
 
-/// Parse test input into a set of `Test`s.
-pub(crate) fn parse_tests(test_str: &str) -> HashMap<String, Test> {
+/// Parse test data into a set of `Test`s.
+pub(crate) fn parse_tests(test_str: &str) -> HashMap<String, TestCmd> {
     let lines = test_str.lines().collect::<Vec<_>>();
     let mut tests = HashMap::new();
     let mut line_off = 0;
@@ -39,7 +39,7 @@ pub(crate) fn parse_tests(test_str: &str) -> HashMap<String, Test> {
             )),
             Entry::Vacant(e) => {
                 line_off += 1;
-                let mut test = Test {
+                let mut testcmd = TestCmd {
                     status: None,
                     stderr: None,
                     stdout: None,
@@ -72,18 +72,18 @@ pub(crate) fn parse_tests(test_str: &str) -> HashMap<String, Test> {
                                     }
                                 }
                             };
-                            test.status = Some(status);
+                            testcmd.status = Some(status);
                         }
                         "stderr" => {
-                            test.stderr = Some(val);
+                            testcmd.stderr = Some(val);
                         }
                         "stdout" => {
-                            test.stdout = Some(val);
+                            testcmd.stdout = Some(val);
                         }
                         _ => fatal(&format!("Unknown key '{}' on line {}.", key, line_off)),
                     }
                 }
-                e.insert(test);
+                e.insert(testcmd);
             }
         }
     }
