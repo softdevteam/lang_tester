@@ -32,7 +32,7 @@ const TIMEOUT: u64 = 60; // seconds
 pub struct LangTester<'a> {
     test_dir: Option<&'a str>,
     use_cmdline_args: bool,
-    test_file_filter: Option<Box<Fn(&Path) -> bool>>,
+    test_file_filter: Option<Box<dyn Fn(&Path) -> bool>>,
     cmdline_filters: Option<Vec<String>>,
     inner: Arc<LangTesterPooler>,
 }
@@ -41,8 +41,8 @@ pub struct LangTester<'a> {
 /// `Arc`.
 struct LangTesterPooler {
     test_threads: usize,
-    test_extract: Option<Box<Fn(&str) -> Option<String> + Send + Sync>>,
-    test_cmds: Option<Box<Fn(&Path) -> Vec<(&str, Command)> + Send + Sync>>,
+    test_extract: Option<Box<dyn Fn(&str) -> Option<String> + Send + Sync>>,
+    test_cmds: Option<Box<dyn Fn(&Path) -> Vec<(&str, Command)> + Send + Sync>>,
 }
 
 impl<'a> LangTester<'a> {
