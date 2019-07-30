@@ -14,6 +14,8 @@ const WILDCARD: &str = "...";
 /// Does `s` conform to the fuzzy pattern `pattern`? Note that `plines` is expected not to start or
 /// end with blank lines, and each line is expected to be `trim`ed.
 pub(crate) fn match_vec(plines: &[&str], s: &str) -> bool {
+    debug_assert!(plines.is_empty() || !plines[0].is_empty());
+    debug_assert!(plines.is_empty() || !plines[plines.len() - 1].is_empty());
     let slines = s.trim().lines().map(|x| x.trim()).collect::<Vec<_>>();
 
     let mut pi = 0;
