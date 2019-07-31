@@ -1,3 +1,9 @@
+# lang_tester 0.3.2 (2019-07-31)
+
+* Fixed bug where potentially multi-line keys with empty values were not always
+  parsed correctly.
+
+
 # lang_tester 0.3.1 (2019-06-04)
 
 * Add support for running a defined number of parallel processes, using the
