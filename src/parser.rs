@@ -131,7 +131,6 @@ fn key_multiline_val<'a>(
     mut line_off: usize,
     indent: usize,
 ) -> (usize, &'a str, Vec<&'a str>) {
-    let orig_line_off = line_off;
     let (key, first_line_val) = key_val(lines, line_off, indent);
     line_off += 1;
     let mut val = vec![first_line_val];
@@ -152,16 +151,35 @@ fn key_multiline_val<'a>(
         }
     }
     // Remove trailing empty strings
-    val.drain(
-        val.iter()
-            .rposition(|x| !x.is_empty())
-            .map(|x| x + 1)
-            .unwrap_or_else(|| val.len())..,
-    );
-    // Remove leading empty strings
-    val.drain(0..val.iter().position(|x| !x.is_empty()).unwrap_or(0));
-    if val.is_empty() {
-        fatal(&format!("Key without value at line {}", orig_line_off));
+    while !val.is_empty() && val[val.len() - 1].is_empty() {
+        val.pop();
     }
+    // Remove leading empty strings
+    while !val.is_empty() && val[0].is_empty() {
+        val.remove(0);
+    }
+
     (line_off, key, val)
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_key_multiline() {
+        assert_eq!(key_multiline_val(&["x:", ""], 0, 0), (2, "x", vec![]));
+        assert_eq!(
+            key_multiline_val(&["x: y", "  z", "a"], 0, 0),
+            (2, "x", vec!["y", "z"])
+        );
+        assert_eq!(
+            key_multiline_val(&["x:", "  z", "a"], 0, 0),
+            (2, "x", vec!["z"])
+        );
+        assert_eq!(
+            key_multiline_val(&["x:", "  z  ", "  a  ", "  ", "b"], 0, 0),
+            (4, "x", vec!["z", "a"])
+        );
+    }
 }
