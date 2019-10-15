@@ -142,3 +142,17 @@ test lang_tests::unused_var ... ok
 
 test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out
 ```
+
+## Integration with Cargo.
+
+Tests created with lang_tester can be used as part of an existing test suite and
+can be run with the `cargo test` command. For example, if the Rust source file
+that runs your lang tests is `lang_tests/run.rs` then add the following to your
+Cargo.toml:
+
+```
+[[test]]
+name = "lang_tests"
+path = "lang_tests/run.rs"
+harness = false
+```
