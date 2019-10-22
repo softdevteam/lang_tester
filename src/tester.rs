@@ -354,6 +354,17 @@ pub(crate) struct TestCmd<'a> {
     pub args: Vec<String>,
 }
 
+impl<'a> TestCmd<'a> {
+    fn default() -> Self {
+        Self {
+            status: Some(Status::Success),
+            stderr: None,
+            stdout: None,
+            args: Vec::new(),
+        }
+    }
+}
+
 /// If one or more parts of a `TestCmd` fail, the parts that fail are set to `Some(...)` in an
 /// instance of this struct.
 #[derive(Debug, PartialEq)]
@@ -452,11 +463,10 @@ fn run_tests(
                 let mut pass_stderr = None;
                 let mut pass_stdout = None;
 
-                let maybe_test = tests.get(&cmd_name);
+                let default_test = TestCmd::default();
+                let test = tests.get(&cmd_name).unwrap_or(&default_test);
 
-                if let Some(t) = maybe_test {
-                    cmd.args(&t.args);
-                };
+                cmd.args(&test.args);
 
                 let mut child = cmd
                     .stderr(process::Stdio::piped())
@@ -485,11 +495,6 @@ fn run_tests(
                 let output = child.wait_with_output().unwrap();
 
                 let mut meant_to_error = false;
-
-                let test = match maybe_test {
-                    Some(t) => t,
-                    None => continue,
-                };
 
                 // First, check whether the tests passed.
                 if let Some(ref status) = test.status {
