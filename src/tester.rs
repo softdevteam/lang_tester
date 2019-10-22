@@ -349,6 +349,9 @@ pub(crate) struct TestCmd<'a> {
     pub status: Option<Status>,
     pub stderr: Option<Vec<&'a str>>,
     pub stdout: Option<Vec<&'a str>>,
+    /// A list of custom command line arguments which should be passed when
+    /// executing the test command.
+    pub args: Vec<String>,
 }
 
 /// If one or more parts of a `TestCmd` fail, the parts that fail are set to `Some(...)` in an
@@ -448,11 +451,19 @@ fn run_tests(
                 let mut pass_status = None;
                 let mut pass_stderr = None;
                 let mut pass_stdout = None;
+
+                let maybe_test = tests.get(&cmd_name);
+
+                if let Some(t) = maybe_test {
+                    cmd.args(&t.args);
+                };
+
                 let mut child = cmd
                     .stderr(process::Stdio::piped())
                     .stdout(process::Stdio::piped())
                     .spawn()
                     .unwrap_or_else(|_| fatal(&format!("Couldn't run command {:?}.", cmd)));
+
                 let mut looped = 1;
                 loop {
                     match child.wait_timeout(Duration::from_secs(TIMEOUT)).unwrap() {
@@ -473,11 +484,12 @@ fn run_tests(
                 }
                 let output = child.wait_with_output().unwrap();
 
-                let test = match tests.get(&cmd_name) {
+                let mut meant_to_error = false;
+
+                let test = match maybe_test {
                     Some(t) => t,
                     None => continue,
                 };
-                let mut meant_to_error = false;
 
                 // First, check whether the tests passed.
                 if let Some(ref status) = test.status {

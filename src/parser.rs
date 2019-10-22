@@ -40,6 +40,7 @@ pub(crate) fn parse_tests(test_str: &str) -> HashMap<String, TestCmd> {
             Entry::Vacant(e) => {
                 line_off += 1;
                 let mut testcmd = TestCmd {
+                    args: Vec::new(),
                     status: None,
                     stderr: None,
                     stdout: None,
@@ -56,6 +57,10 @@ pub(crate) fn parse_tests(test_str: &str) -> HashMap<String, TestCmd> {
                     let (end_line_off, key, val) = key_multiline_val(&lines, line_off, sub_indent);
                     line_off = end_line_off;
                     match key {
+                        "extra-args" => {
+                            let val_str = val.join("\n");
+                            testcmd.args.push(val_str);
+                        }
                         "status" => {
                             let val_str = val.join("\n");
                             let status = match val_str.to_lowercase().as_str() {
