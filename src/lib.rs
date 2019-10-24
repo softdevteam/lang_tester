@@ -86,12 +86,13 @@
 //! ```
 //!
 //! Test data is specified with a two-level indentation syntax: the outer most level of indentation
-//! defines a test command (multiple command names can be specified, as in the above); each test
-//! command can then define sub-tests for one or more of:
+//! defines a test command (multiple command names can be specified, as in the above); the inner
+//! most level of indentation defines alterations to the general command or sub-tests. Each test
+//! command must define at least one sub-test:
 //!
 //!   * `status: <success|failure|<int>>`, where `success` and `failure` map to platform specific
-//!      notions of a command completing successfully or unsuccessfully respectively and `<int>` is
-//!      a signed integer checking for a specific exit code on platforms that support it.
+//!      notions of a command completing successfully or unsuccessfully respectively and `<int>` is a
+//!      signed integer checking for a specific exit code on platforms that support it.
 //!   * `stderr: [<string>]`, `stdout: [<string>]` are matched strings against a command's `stderr`
 //!     or `stdout`. The special string `...` can be used as a simple wildcard: if a line consists
 //!     solely of `...`, it means "match zero or more lines"; if a line begins with `...`, it means
@@ -99,9 +100,10 @@
 //!     start of the line only". A line may start and end with `...`. Note that `stderr`/`stdout`
 //!     matches ignore leading/trailing whitespace and newlines, but are case sensitive.
 //!
-//! The above file thus contains 4 actual tests: the `Compiler` should succeed (e.g. return a `0`
-//! exit code when run on Unix), and its `stderr` output should warn about an unused variable on
-//! line 12; and the resulting binary should succeed and produce `Hello world` on `stdout`.
+//! Test commands can alter the general command by specifying zero or more of the following:
+//!
+//!   * `extra-args: <arg 1> [... <arg n>]`, where each space separated argument will be appended,
+//!     in order, to those arguments specified as part of the `test_cmds` function.
 //!
 //! Potential sub-tests that are not mentioned are not tested: for example, the above file does not
 //! state whether the `Compiler`s `stdout` should have content or not (but note that the line
