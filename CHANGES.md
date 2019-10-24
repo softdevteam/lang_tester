@@ -1,3 +1,14 @@
+# lang_tester 0.3.3 (2019-10-24)
+
+* Individual tests can now add extra arguments to an invoked command with the
+  `extra-args` field.
+
+* Ensure that, if a command in a chain fails, the whole chain of commands
+  fails. This means that if, for example, compilation of command C fails, we do
+  not try and run C anyway (which can end up doing confusing things like
+  running an old version of C).
+
+
 # lang_tester 0.3.2 (2019-07-31)
 
 * Fixed bug where potentially multi-line keys with empty values were not always
