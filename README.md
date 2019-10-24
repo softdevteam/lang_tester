@@ -82,8 +82,9 @@ fn main() {
 
 Test data is specified with a two-level indentation syntax: the outer most
 level of indentation defines a test command (multiple command names can be
-specified, as in the above); each test command can then define sub-tests for
-one or more of:
+specified, as in the above); the inner most level of indentation defines
+alterations to the general command or sub-tests. Each test command must
+define at least one sub-test:
 
   * `status: <success|failure|<int>>`, where `success` and `failure` map to
     platform specific notions of a command completing successfully or
@@ -97,6 +98,13 @@ one or more of:
     the line only". A line may start and end with `...`. Note that
     `stderr`/`stdout` matches ignore leading/trailing whitespace and newlines,
     but are case sensitive.
+
+Test commands can alter the general command by specifying zero or more of the
+following:
+
+  * `extra-args: <arg 1> [... <arg n>]`, where each space separated argument
+    will be appended, in order, to those arguments specified as part of
+    the `test_cmds` function.
 
 The above file thus contains 4 actual tests: the `Compiler` should succeed
 (e.g. return a `0` exit code when run on Unix), and its `stderr` output should
