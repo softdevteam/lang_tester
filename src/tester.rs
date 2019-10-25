@@ -492,10 +492,8 @@ fn run_tests(
                     }
                     Status::Int(i) => status.code() == Some(i),
                 };
-                let stderr_utf8 = String::from_utf8(stderr).unwrap();
-                let pass_stderr = fuzzy::match_vec(&test.stderr, &stderr_utf8);
-                let stdout_utf8 = String::from_utf8(stdout).unwrap();
-                let pass_stdout = fuzzy::match_vec(&test.stdout, &stdout_utf8);
+                let pass_stderr = fuzzy::match_vec(&test.stderr, &stderr);
+                let pass_stdout = fuzzy::match_vec(&test.stdout, &stdout);
 
                 // Second, if a test failed, we want to print out everything which didn't match
                 // successfully (i.e. if the stderr test failed, print that out; but, equally, if
@@ -523,11 +521,11 @@ fn run_tests(
                     }
 
                     if !pass_stderr || failure.stderr.is_none() {
-                        failure.stderr = Some(stderr_utf8);
+                        failure.stderr = Some(stderr);
                     }
 
                     if !pass_stdout || failure.stdout.is_none() {
-                        failure.stdout = Some(stdout_utf8);
+                        failure.stdout = Some(stdout);
                     }
 
                     // If a sub-test failed, bail out immediately, otherwise subsequent sub-tests
@@ -585,7 +583,7 @@ fn run_cmd(
     inner: Arc<LangTesterPooler>,
     test_fname: &str,
     mut cmd: Command,
-) -> (ExitStatus, Vec<u8>, Vec<u8>) {
+) -> (ExitStatus, String, String) {
     // The basic sequence here is:
     //   1) Spawn the command
     //   2) Read everything from stderr & stdout until they are both disconnected
@@ -601,8 +599,8 @@ fn run_cmd(
     let mut stderr = FileDescriptor::dup(child.stderr.as_ref().unwrap()).unwrap();
     let mut stdout = FileDescriptor::dup(child.stdout.as_ref().unwrap()).unwrap();
 
-    let mut cap_stderr = Vec::new();
-    let mut cap_stdout = Vec::new();
+    let mut cap_stderr = String::new();
+    let mut cap_stdout = String::new();
     let mut pollfds = [
         pollfd {
             fd: FileDescriptor::dup(&stderr)
@@ -641,21 +639,27 @@ fn run_cmd(
                     if i == 0 {
                         break;
                     }
-                    cap_stderr.extend_from_slice(&buf[..i]);
+                    let utf8 = str::from_utf8(&buf[..i]).unwrap_or_else(|_| {
+                        fatal(&format!("Can't convert stderr from '{:?}' into UTF-8", cmd))
+                    });
+                    cap_stderr.push_str(&utf8);
                     if inner.nocapture {
-                        eprint!("{}", str::from_utf8(&buf).unwrap());
+                        eprint!("{}", utf8);
                     }
                 }
             }
 
-            if pollfds[0].revents & POLLIN == POLLIN {
+            if pollfds[1].revents & POLLIN == POLLIN {
                 while let Ok(i) = stdout.read(&mut buf) {
                     if i == 0 {
                         break;
                     }
-                    cap_stdout.extend_from_slice(&buf[..i]);
+                    let utf8 = str::from_utf8(&buf[..i]).unwrap_or_else(|_| {
+                        fatal(&format!("Can't convert stdout from '{:?}' into UTF-8", cmd))
+                    });
+                    cap_stdout.push_str(&utf8);
                     if inner.nocapture {
-                        print!("{}", str::from_utf8(&buf).unwrap());
+                        print!("{}", utf8);
                     }
                 }
             }
