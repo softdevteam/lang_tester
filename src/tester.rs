@@ -13,7 +13,7 @@ use std::{
     fs::read_to_string,
     io::{self, Write},
     path::{Path, PathBuf},
-    process::{self, Command},
+    process::{self, Command, ExitStatus},
     sync::{Arc, Mutex},
     time::Duration,
 };
@@ -461,49 +461,23 @@ fn run_tests(
             for (cmd_name, mut cmd) in cmd_pairs {
                 let default_test = TestCmd::default();
                 let test = tests.get(&cmd_name).unwrap_or(&default_test);
-
                 cmd.args(&test.args);
-
-                let mut child = cmd
-                    .stderr(process::Stdio::piped())
-                    .stdout(process::Stdio::piped())
-                    .spawn()
-                    .unwrap_or_else(|_| fatal(&format!("Couldn't run command {:?}.", cmd)));
-
-                let mut looped = 1;
-                loop {
-                    match child.wait_timeout(Duration::from_secs(TIMEOUT)).unwrap() {
-                        Some(_) => break,
-                        None => {
-                            if inner.test_threads == 1 {
-                                eprint!("running for over {} seconds... ", TIMEOUT * looped);
-                            } else {
-                                eprintln!(
-                                    "\nlang_tests::{} ... has been running for over {} seconds",
-                                    test_fname,
-                                    TIMEOUT * looped
-                                );
-                            }
-                        }
-                    };
-                    looped += 1;
-                }
-                let output = child.wait_with_output().unwrap();
+                let (status, stderr, stdout) = run_cmd(inner.clone(), &test_fname, cmd);
 
                 let mut meant_to_error = false;
 
                 // First, check whether the tests passed.
                 let pass_status = match test.status {
-                    Status::Success => output.status.success(),
+                    Status::Success => status.success(),
                     Status::Error => {
                         meant_to_error = true;
-                        !output.status.success()
+                        !status.success()
                     }
-                    Status::Int(i) => output.status.code() == Some(i),
+                    Status::Int(i) => status.code() == Some(i),
                 };
-                let stderr_utf8 = String::from_utf8(output.stderr).unwrap();
+                let stderr_utf8 = String::from_utf8(stderr).unwrap();
                 let pass_stderr = fuzzy::match_vec(&test.stderr, &stderr_utf8);
-                let stdout_utf8 = String::from_utf8(output.stdout).unwrap();
+                let stdout_utf8 = String::from_utf8(stdout).unwrap();
                 let pass_stdout = fuzzy::match_vec(&test.stdout, &stdout_utf8);
 
                 // Second, if a test failed, we want to print out everything which didn't match
@@ -514,7 +488,7 @@ fn run_tests(
                     if !pass_status {
                         match test.status {
                             Status::Success | Status::Error => {
-                                if output.status.success() {
+                                if status.success() {
                                     failure.status = Some("Success".to_owned());
                                 } else {
                                     failure.status = Some("Error".to_owned());
@@ -522,8 +496,7 @@ fn run_tests(
                             }
                             Status::Int(_) => {
                                 failure.status = Some(
-                                    output
-                                        .status
+                                    status
                                         .code()
                                         .map(|x| x.to_string())
                                         .unwrap_or_else(|| "Exited due to signal".to_owned()),
@@ -546,7 +519,7 @@ fn run_tests(
                 }
 
                 // If a command failed, and we weren't expecting it to, bail out immediately.
-                if !output.status.success() && meant_to_error {
+                if !status.success() && meant_to_error {
                     break;
                 }
             }
@@ -589,4 +562,37 @@ fn run_tests(
     let failures = Mutex::into_inner(Arc::try_unwrap(failures).unwrap()).unwrap();
 
     (failures, num_ignored)
+}
+
+fn run_cmd(
+    inner: Arc<LangTesterPooler>,
+    test_fname: &str,
+    mut cmd: Command,
+) -> (ExitStatus, Vec<u8>, Vec<u8>) {
+    let mut child = cmd
+        .stderr(process::Stdio::piped())
+        .stdout(process::Stdio::piped())
+        .spawn()
+        .unwrap_or_else(|_| fatal(&format!("Couldn't run command {:?}.", cmd)));
+
+    let mut looped = 1;
+    loop {
+        match child.wait_timeout(Duration::from_secs(TIMEOUT)).unwrap() {
+            Some(_) => break,
+            None => {
+                if inner.test_threads == 1 {
+                    eprint!("running for over {} seconds... ", TIMEOUT * looped);
+                } else {
+                    eprintln!(
+                        "\nlang_tests::{} ... has been running for over {} seconds",
+                        test_fname,
+                        TIMEOUT * looped
+                    );
+                }
+            }
+        };
+        looped += 1;
+    }
+    let output = child.wait_with_output().unwrap();
+    (output.status, output.stderr, output.stdout)
 }
