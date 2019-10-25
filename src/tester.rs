@@ -11,22 +11,29 @@ use std::{
     collections::{hash_map::HashMap, HashSet},
     env,
     fs::read_to_string,
-    io::{self, Write},
+    io::{self, Read, Write},
     path::{Path, PathBuf},
     process::{self, Command, ExitStatus},
+    str,
     sync::{Arc, Mutex},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
+use filedescriptor::{
+    poll, pollfd, FileDescriptor, IntoRawSocketDescriptor, POLLERR, POLLHUP, POLLIN,
+};
 use getopts::Options;
 use num_cpus;
 use termcolor::{Color, ColorChoice, ColorSpec, StandardStream, WriteColor};
 use threadpool::ThreadPool;
-use wait_timeout::ChildExt;
 use walkdir::WalkDir;
 
 use crate::{fatal, fuzzy, parser::parse_tests};
 
+/// The size of the (stack allocated) buffer use to read stderr/stdout from a child process.
+const READBUF: usize = 1024 * 4; // bytes
+/// Print a warning to the user every multiple of `TIMEOUT` seconds that a child process has run
+/// without completing.
 const TIMEOUT: u64 = 60; // seconds
 
 pub struct LangTester<'a> {
@@ -41,6 +48,7 @@ pub struct LangTester<'a> {
 /// `Arc`.
 struct LangTesterPooler {
     test_threads: usize,
+    nocapture: bool,
     test_extract: Option<Box<dyn Fn(&str) -> Option<String> + Send + Sync>>,
     test_cmds: Option<Box<dyn Fn(&Path) -> Vec<(&str, Command)> + Send + Sync>>,
 }
@@ -56,6 +64,7 @@ impl<'a> LangTester<'a> {
             use_cmdline_args: true,
             cmdline_filters: None,
             inner: Arc::new(LangTesterPooler {
+                nocapture: false,
                 test_threads: num_cpus::get(),
                 test_extract: None,
                 test_cmds: None,
@@ -246,6 +255,11 @@ impl<'a> LangTester<'a> {
             let args: Vec<String> = env::args().collect();
             let matches = Options::new()
                 .optflag("h", "help", "")
+                .optflag(
+                    "",
+                    "nocapture",
+                    "Pass command stderr/stdout through to the terminal",
+                )
                 .optopt(
                     "",
                     "test-threads",
@@ -256,6 +270,9 @@ impl<'a> LangTester<'a> {
                 .unwrap_or_else(|_| usage());
             if matches.opt_present("h") {
                 usage();
+            }
+            if matches.opt_present("nocapture") {
+                Arc::get_mut(&mut self.inner).unwrap().nocapture = true;
             }
             if let Some(s) = matches.opt_str("test-threads") {
                 let test_threads = s.parse::<usize>().unwrap_or_else(|_| usage());
@@ -302,7 +319,7 @@ impl<'a> LangTester<'a> {
                 }
                 if let Some(ref stdout) = test.stdout {
                     eprintln!(
-                        "\n---- lang_tests::{} stdout ----\n{}\n",
+                        "\n---- lang_tests::{} stdout ----\n'{}'\n",
                         test_fname, stdout
                     );
                 }
@@ -485,7 +502,7 @@ fn run_tests(
                 // stderr wasn't specified as a test, print it out, because the user can't
                 // otherwise know what it contains).
                 if !(pass_status && pass_stderr && pass_stdout) {
-                    if !pass_status {
+                    if !pass_status || failure.status.is_none() {
                         match test.status {
                             Status::Success | Status::Error => {
                                 if status.success() {
@@ -505,11 +522,11 @@ fn run_tests(
                         }
                     }
 
-                    if !pass_stderr {
+                    if !pass_stderr || failure.stderr.is_none() {
                         failure.stderr = Some(stderr_utf8);
                     }
 
-                    if !pass_stdout {
+                    if !pass_stdout || failure.stdout.is_none() {
                         failure.stdout = Some(stdout_utf8);
                     }
 
@@ -569,30 +586,104 @@ fn run_cmd(
     test_fname: &str,
     mut cmd: Command,
 ) -> (ExitStatus, Vec<u8>, Vec<u8>) {
+    // The basic sequence here is:
+    //   1) Spawn the command
+    //   2) Read everything from stderr & stdout until they are both disconnected
+    //   3) wait() for the command to finish
+
     let mut child = cmd
         .stderr(process::Stdio::piped())
         .stdout(process::Stdio::piped())
+        .stdin(process::Stdio::null())
         .spawn()
         .unwrap_or_else(|_| fatal(&format!("Couldn't run command {:?}.", cmd)));
 
-    let mut looped = 1;
+    let mut stderr = FileDescriptor::dup(child.stderr.as_ref().unwrap()).unwrap();
+    let mut stdout = FileDescriptor::dup(child.stdout.as_ref().unwrap()).unwrap();
+
+    let mut cap_stderr = Vec::new();
+    let mut cap_stdout = Vec::new();
+    let mut pollfds = [
+        pollfd {
+            fd: FileDescriptor::dup(&stderr)
+                .unwrap()
+                .into_socket_descriptor(),
+            events: POLLERR | POLLIN | POLLHUP,
+            revents: 0,
+        },
+        pollfd {
+            fd: FileDescriptor::dup(&stdout)
+                .unwrap()
+                .into_socket_descriptor(),
+            events: POLLERR | POLLIN | POLLHUP,
+            revents: 0,
+        },
+    ];
+    let mut buf = [0; READBUF];
+    let start = Instant::now();
+    let mut last_warning = Instant::now();
+    let mut next_warning = last_warning
+        .checked_add(Duration::from_secs(TIMEOUT))
+        .unwrap();
     loop {
-        match child.wait_timeout(Duration::from_secs(TIMEOUT)).unwrap() {
-            Some(_) => break,
-            None => {
-                if inner.test_threads == 1 {
-                    eprint!("running for over {} seconds... ", TIMEOUT * looped);
-                } else {
-                    eprintln!(
-                        "\nlang_tests::{} ... has been running for over {} seconds",
-                        test_fname,
-                        TIMEOUT * looped
-                    );
-                }
+        let timeout = {
+            // FIXME: When Rust 1.39.0 is out we can replace this mess with duration_since_checked.
+            let t = Instant::now();
+            if t > next_warning {
+                Duration::from_secs(1)
+            } else {
+                next_warning.duration_since(t)
             }
         };
-        looped += 1;
+        if let Ok(_) = poll(&mut pollfds, Some(timeout)) {
+            if pollfds[0].revents & POLLIN == POLLIN {
+                while let Ok(i) = stderr.read(&mut buf) {
+                    if i == 0 {
+                        break;
+                    }
+                    cap_stderr.extend_from_slice(&buf[..i]);
+                    if inner.nocapture {
+                        eprint!("{}", str::from_utf8(&buf).unwrap());
+                    }
+                }
+            }
+
+            if pollfds[0].revents & POLLIN == POLLIN {
+                while let Ok(i) = stdout.read(&mut buf) {
+                    if i == 0 {
+                        break;
+                    }
+                    cap_stdout.extend_from_slice(&buf[..i]);
+                    if inner.nocapture {
+                        print!("{}", str::from_utf8(&buf).unwrap());
+                    }
+                }
+            }
+
+            if pollfds[0].revents & POLLHUP == POLLHUP && pollfds[1].revents & POLLHUP == POLLHUP {
+                break;
+            }
+        }
+
+        if Instant::now() >= next_warning {
+            let running_for = ((Instant::now() - start).as_secs() / TIMEOUT) * TIMEOUT;
+            if inner.test_threads == 1 {
+                eprint!("running for over {} seconds... ", running_for);
+            } else {
+                eprintln!(
+                    "\nlang_tests::{} ... has been running for over {} seconds",
+                    test_fname, running_for
+                );
+            }
+            last_warning = next_warning;
+            next_warning = last_warning
+                .checked_add(Duration::from_secs(TIMEOUT))
+                .unwrap();
+        }
     }
-    let output = child.wait_with_output().unwrap();
-    (output.status, output.stderr, output.stdout)
+
+    let status = child
+        .wait()
+        .unwrap_or_else(|_| fatal(&format!("{:?} did not exit correctly.", cmd)));
+    (status, cap_stderr, cap_stdout)
 }
