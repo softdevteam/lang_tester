@@ -346,20 +346,20 @@ pub(crate) enum Status {
 /// A user `TestCmd`.
 #[derive(Clone, Debug)]
 pub(crate) struct TestCmd<'a> {
-    pub status: Option<Status>,
-    pub stderr: Option<Vec<&'a str>>,
-    pub stdout: Option<Vec<&'a str>>,
+    pub status: Status,
+    pub stderr: Vec<&'a str>,
+    pub stdout: Vec<&'a str>,
     /// A list of custom command line arguments which should be passed when
     /// executing the test command.
     pub args: Vec<String>,
 }
 
 impl<'a> TestCmd<'a> {
-    fn default() -> Self {
+    pub fn default() -> Self {
         Self {
-            status: Some(Status::Success),
-            stderr: None,
-            stdout: None,
+            status: Status::Success,
+            stderr: vec!["..."],
+            stdout: vec!["..."],
             args: Vec::new(),
         }
     }
@@ -459,10 +459,6 @@ fn run_tests(
                 stdout: None,
             };
             for (cmd_name, mut cmd) in cmd_pairs {
-                let mut pass_status = None;
-                let mut pass_stderr = None;
-                let mut pass_stdout = None;
-
                 let default_test = TestCmd::default();
                 let test = tests.get(&cmd_name).unwrap_or(&default_test);
 
@@ -497,43 +493,34 @@ fn run_tests(
                 let mut meant_to_error = false;
 
                 // First, check whether the tests passed.
-                if let Some(ref status) = test.status {
-                    pass_status = Some(match status {
-                        Status::Success => output.status.success(),
-                        Status::Error => {
-                            meant_to_error = true;
-                            !output.status.success()
-                        }
-                        Status::Int(i) => output.status.code() == Some(*i),
-                    });
-                }
+                let pass_status = match test.status {
+                    Status::Success => output.status.success(),
+                    Status::Error => {
+                        meant_to_error = true;
+                        !output.status.success()
+                    }
+                    Status::Int(i) => output.status.code() == Some(i),
+                };
                 let stderr_utf8 = String::from_utf8(output.stderr).unwrap();
-                if let Some(ref stderr) = test.stderr {
-                    pass_stderr = Some(fuzzy::match_vec(stderr, &stderr_utf8));
-                }
+                let pass_stderr = fuzzy::match_vec(&test.stderr, &stderr_utf8);
                 let stdout_utf8 = String::from_utf8(output.stdout).unwrap();
-                if let Some(ref stdout) = test.stdout {
-                    pass_stdout = Some(fuzzy::match_vec(stdout, &stdout_utf8));
-                }
+                let pass_stdout = fuzzy::match_vec(&test.stdout, &stdout_utf8);
 
                 // Second, if a test failed, we want to print out everything which didn't match
                 // successfully (i.e. if the stderr test failed, print that out; but, equally, if
                 // stderr wasn't specified as a test, print it out, because the user can't
                 // otherwise know what it contains).
-                if pass_status == Some(false)
-                    || pass_stderr == Some(false)
-                    || pass_stdout == Some(false)
-                {
-                    if pass_status.is_none() || pass_status == Some(false) {
+                if !(pass_status && pass_stderr && pass_stdout) {
+                    if !pass_status {
                         match test.status {
-                            None | Some(Status::Success) | Some(Status::Error) => {
+                            Status::Success | Status::Error => {
                                 if output.status.success() {
                                     failure.status = Some("Success".to_owned());
                                 } else {
                                     failure.status = Some("Error".to_owned());
                                 }
                             }
-                            Some(Status::Int(_)) => {
+                            Status::Int(_) => {
                                 failure.status = Some(
                                     output
                                         .status
@@ -545,11 +532,11 @@ fn run_tests(
                         }
                     }
 
-                    if pass_stderr.is_none() || pass_stderr == Some(false) {
+                    if !pass_stderr {
                         failure.stderr = Some(stderr_utf8);
                     }
 
-                    if pass_stdout.is_none() || pass_stdout == Some(false) {
+                    if !pass_stdout {
                         failure.stdout = Some(stdout_utf8);
                     }
 

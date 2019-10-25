@@ -1,7 +1,6 @@
 // Run-time:
 //   extra-args: 1
 //   extra-args: 2
-//   status: success
 
 use std::env;
 

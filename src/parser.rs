@@ -39,12 +39,7 @@ pub(crate) fn parse_tests(test_str: &str) -> HashMap<String, TestCmd> {
             )),
             Entry::Vacant(e) => {
                 line_off += 1;
-                let mut testcmd = TestCmd {
-                    args: Vec::new(),
-                    status: None,
-                    stderr: None,
-                    stdout: None,
-                };
+                let mut testcmd = TestCmd::default();
                 while line_off < lines.len() {
                     let sub_indent = indent_level(&lines, line_off);
                     if sub_indent == lines[line_off].len() {
@@ -77,13 +72,13 @@ pub(crate) fn parse_tests(test_str: &str) -> HashMap<String, TestCmd> {
                                     }
                                 }
                             };
-                            testcmd.status = Some(status);
+                            testcmd.status = status;
                         }
                         "stderr" => {
-                            testcmd.stderr = Some(val);
+                            testcmd.stderr = val;
                         }
                         "stdout" => {
-                            testcmd.stdout = Some(val);
+                            testcmd.stdout = val;
                         }
                         _ => fatal(&format!("Unknown key '{}' on line {}.", key, line_off)),
                     }
