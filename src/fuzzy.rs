@@ -76,6 +76,9 @@ mod tests {
         assert!(match_vec_helper("", ""));
         assert!(match_vec_helper("a", "a"));
         assert!(!match_vec_helper("a", "ab"));
+        assert!(match_vec_helper("...", ""));
+        assert!(match_vec_helper("...", "a"));
+        assert!(match_vec_helper("...", "a\nb"));
         assert!(match_vec_helper("...\na", "a"));
         assert!(match_vec_helper("...\na\n...", "a"));
         assert!(match_vec_helper("a\n...", "a"));
