@@ -16,6 +16,7 @@ use std::{
     process::{self, Command, ExitStatus},
     str,
     sync::{Arc, Mutex},
+    thread::sleep,
     time::{Duration, Instant},
 };
 
@@ -35,6 +36,11 @@ const READBUF: usize = 1024 * 4; // bytes
 /// Print a warning to the user every multiple of `TIMEOUT` seconds that a child process has run
 /// without completing.
 const TIMEOUT: u64 = 60; // seconds
+/// The time that we should initially wait() for a child process to exit. This should be a very
+/// small value, as most child processes will exit almost immediately.
+const INITIAL_WAIT_TIMEOUT: u64 = 10000; // nanoseconds
+/// The maximum time we should wait() between checking if a child process has exited.
+const MAX_WAIT_TIMEOUT: u64 = 250000000; // nanoseconds
 
 pub struct LangTester<'a> {
     test_dir: Option<&'a str>,
@@ -686,8 +692,41 @@ fn run_cmd(
         }
     }
 
-    let status = child
-        .wait()
-        .unwrap_or_else(|_| fatal(&format!("{:?} did not exit correctly.", cmd)));
+    let status = {
+        // We have no idea how long it will take the child process to exit. In practise, the mere
+        // act of yielding (via sleep) for a ridiculously short period of time will often be enough
+        // for the child process to exit. So we use an exponentially increasing timeout with a very
+        // short initial period so that, in the common case, we don't waste time waiting for
+        // something that's almost certainly already occurred.
+        let mut wait_timeout = INITIAL_WAIT_TIMEOUT;
+        loop {
+            match child.try_wait() {
+                Ok(Some(s)) => break s,
+                Ok(None) => (),
+                Err(e) => fatal(&format!("{:?} did not exit correctly: {:?}", cmd, e)),
+            }
+
+            if Instant::now() >= next_warning {
+                let running_for = ((Instant::now() - start).as_secs() / TIMEOUT) * TIMEOUT;
+                if inner.test_threads == 1 {
+                    eprint!("running for over {} seconds... ", running_for);
+                } else {
+                    eprintln!(
+                        "\nlang_tests::{} ... has been running for over {} seconds",
+                        test_fname, running_for
+                    );
+                }
+                last_warning = next_warning;
+                next_warning = last_warning
+                    .checked_add(Duration::from_secs(TIMEOUT))
+                    .unwrap();
+            }
+            sleep(Duration::from_nanos(wait_timeout));
+            wait_timeout *= 2;
+            if wait_timeout > MAX_WAIT_TIMEOUT {
+                wait_timeout = MAX_WAIT_TIMEOUT;
+            }
+        }
+    };
     (status, cap_stderr, cap_stdout)
 }
