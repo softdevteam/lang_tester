@@ -11,23 +11,36 @@ use std::{
     collections::{hash_map::HashMap, HashSet},
     env,
     fs::read_to_string,
-    io::{self, Write},
+    io::{self, Read, Write},
     path::{Path, PathBuf},
-    process::{self, Command},
+    process::{self, Command, ExitStatus},
+    str,
     sync::{Arc, Mutex},
-    time::Duration,
+    thread::sleep,
+    time::{Duration, Instant},
 };
 
+use filedescriptor::{
+    poll, pollfd, FileDescriptor, IntoRawSocketDescriptor, POLLERR, POLLHUP, POLLIN,
+};
 use getopts::Options;
 use num_cpus;
 use termcolor::{Color, ColorChoice, ColorSpec, StandardStream, WriteColor};
 use threadpool::ThreadPool;
-use wait_timeout::ChildExt;
 use walkdir::WalkDir;
 
 use crate::{fatal, fuzzy, parser::parse_tests};
 
+/// The size of the (stack allocated) buffer use to read stderr/stdout from a child process.
+const READBUF: usize = 1024 * 4; // bytes
+/// Print a warning to the user every multiple of `TIMEOUT` seconds that a child process has run
+/// without completing.
 const TIMEOUT: u64 = 60; // seconds
+/// The time that we should initially wait() for a child process to exit. This should be a very
+/// small value, as most child processes will exit almost immediately.
+const INITIAL_WAIT_TIMEOUT: u64 = 10000; // nanoseconds
+/// The maximum time we should wait() between checking if a child process has exited.
+const MAX_WAIT_TIMEOUT: u64 = 250000000; // nanoseconds
 
 pub struct LangTester<'a> {
     test_dir: Option<&'a str>,
@@ -41,6 +54,7 @@ pub struct LangTester<'a> {
 /// `Arc`.
 struct LangTesterPooler {
     test_threads: usize,
+    nocapture: bool,
     test_extract: Option<Box<dyn Fn(&str) -> Option<String> + Send + Sync>>,
     test_cmds: Option<Box<dyn Fn(&Path) -> Vec<(&str, Command)> + Send + Sync>>,
 }
@@ -56,6 +70,7 @@ impl<'a> LangTester<'a> {
             use_cmdline_args: true,
             cmdline_filters: None,
             inner: Arc::new(LangTesterPooler {
+                nocapture: false,
                 test_threads: num_cpus::get(),
                 test_extract: None,
                 test_cmds: None,
@@ -246,6 +261,11 @@ impl<'a> LangTester<'a> {
             let args: Vec<String> = env::args().collect();
             let matches = Options::new()
                 .optflag("h", "help", "")
+                .optflag(
+                    "",
+                    "nocapture",
+                    "Pass command stderr/stdout through to the terminal",
+                )
                 .optopt(
                     "",
                     "test-threads",
@@ -256,6 +276,9 @@ impl<'a> LangTester<'a> {
                 .unwrap_or_else(|_| usage());
             if matches.opt_present("h") {
                 usage();
+            }
+            if matches.opt_present("nocapture") {
+                Arc::get_mut(&mut self.inner).unwrap().nocapture = true;
             }
             if let Some(s) = matches.opt_str("test-threads") {
                 let test_threads = s.parse::<usize>().unwrap_or_else(|_| usage());
@@ -302,7 +325,7 @@ impl<'a> LangTester<'a> {
                 }
                 if let Some(ref stdout) = test.stdout {
                     eprintln!(
-                        "\n---- lang_tests::{} stdout ----\n{}\n",
+                        "\n---- lang_tests::{} stdout ----\n'{}'\n",
                         test_fname, stdout
                     );
                 }
@@ -461,60 +484,32 @@ fn run_tests(
             for (cmd_name, mut cmd) in cmd_pairs {
                 let default_test = TestCmd::default();
                 let test = tests.get(&cmd_name).unwrap_or(&default_test);
-
                 cmd.args(&test.args);
-
-                let mut child = cmd
-                    .stderr(process::Stdio::piped())
-                    .stdout(process::Stdio::piped())
-                    .spawn()
-                    .unwrap_or_else(|_| fatal(&format!("Couldn't run command {:?}.", cmd)));
-
-                let mut looped = 1;
-                loop {
-                    match child.wait_timeout(Duration::from_secs(TIMEOUT)).unwrap() {
-                        Some(_) => break,
-                        None => {
-                            if inner.test_threads == 1 {
-                                eprint!("running for over {} seconds... ", TIMEOUT * looped);
-                            } else {
-                                eprintln!(
-                                    "\nlang_tests::{} ... has been running for over {} seconds",
-                                    test_fname,
-                                    TIMEOUT * looped
-                                );
-                            }
-                        }
-                    };
-                    looped += 1;
-                }
-                let output = child.wait_with_output().unwrap();
+                let (status, stderr, stdout) = run_cmd(inner.clone(), &test_fname, cmd);
 
                 let mut meant_to_error = false;
 
                 // First, check whether the tests passed.
                 let pass_status = match test.status {
-                    Status::Success => output.status.success(),
+                    Status::Success => status.success(),
                     Status::Error => {
                         meant_to_error = true;
-                        !output.status.success()
+                        !status.success()
                     }
-                    Status::Int(i) => output.status.code() == Some(i),
+                    Status::Int(i) => status.code() == Some(i),
                 };
-                let stderr_utf8 = String::from_utf8(output.stderr).unwrap();
-                let pass_stderr = fuzzy::match_vec(&test.stderr, &stderr_utf8);
-                let stdout_utf8 = String::from_utf8(output.stdout).unwrap();
-                let pass_stdout = fuzzy::match_vec(&test.stdout, &stdout_utf8);
+                let pass_stderr = fuzzy::match_vec(&test.stderr, &stderr);
+                let pass_stdout = fuzzy::match_vec(&test.stdout, &stdout);
 
                 // Second, if a test failed, we want to print out everything which didn't match
                 // successfully (i.e. if the stderr test failed, print that out; but, equally, if
                 // stderr wasn't specified as a test, print it out, because the user can't
                 // otherwise know what it contains).
                 if !(pass_status && pass_stderr && pass_stdout) {
-                    if !pass_status {
+                    if !pass_status || failure.status.is_none() {
                         match test.status {
                             Status::Success | Status::Error => {
-                                if output.status.success() {
+                                if status.success() {
                                     failure.status = Some("Success".to_owned());
                                 } else {
                                     failure.status = Some("Error".to_owned());
@@ -522,8 +517,7 @@ fn run_tests(
                             }
                             Status::Int(_) => {
                                 failure.status = Some(
-                                    output
-                                        .status
+                                    status
                                         .code()
                                         .map(|x| x.to_string())
                                         .unwrap_or_else(|| "Exited due to signal".to_owned()),
@@ -532,12 +526,12 @@ fn run_tests(
                         }
                     }
 
-                    if !pass_stderr {
-                        failure.stderr = Some(stderr_utf8);
+                    if !pass_stderr || failure.stderr.is_none() {
+                        failure.stderr = Some(stderr);
                     }
 
-                    if !pass_stdout {
-                        failure.stdout = Some(stdout_utf8);
+                    if !pass_stdout || failure.stdout.is_none() {
+                        failure.stdout = Some(stdout);
                     }
 
                     // If a sub-test failed, bail out immediately, otherwise subsequent sub-tests
@@ -546,7 +540,7 @@ fn run_tests(
                 }
 
                 // If a command failed, and we weren't expecting it to, bail out immediately.
-                if !output.status.success() && meant_to_error {
+                if !status.success() && meant_to_error {
                     break;
                 }
             }
@@ -589,4 +583,150 @@ fn run_tests(
     let failures = Mutex::into_inner(Arc::try_unwrap(failures).unwrap()).unwrap();
 
     (failures, num_ignored)
+}
+
+fn run_cmd(
+    inner: Arc<LangTesterPooler>,
+    test_fname: &str,
+    mut cmd: Command,
+) -> (ExitStatus, String, String) {
+    // The basic sequence here is:
+    //   1) Spawn the command
+    //   2) Read everything from stderr & stdout until they are both disconnected
+    //   3) wait() for the command to finish
+
+    let mut child = cmd
+        .stderr(process::Stdio::piped())
+        .stdout(process::Stdio::piped())
+        .stdin(process::Stdio::null())
+        .spawn()
+        .unwrap_or_else(|_| fatal(&format!("Couldn't run command {:?}.", cmd)));
+
+    let mut stderr = FileDescriptor::dup(child.stderr.as_ref().unwrap()).unwrap();
+    let mut stdout = FileDescriptor::dup(child.stdout.as_ref().unwrap()).unwrap();
+
+    let mut cap_stderr = String::new();
+    let mut cap_stdout = String::new();
+    let mut pollfds = [
+        pollfd {
+            fd: FileDescriptor::dup(&stderr)
+                .unwrap()
+                .into_socket_descriptor(),
+            events: POLLERR | POLLIN | POLLHUP,
+            revents: 0,
+        },
+        pollfd {
+            fd: FileDescriptor::dup(&stdout)
+                .unwrap()
+                .into_socket_descriptor(),
+            events: POLLERR | POLLIN | POLLHUP,
+            revents: 0,
+        },
+    ];
+    let mut buf = [0; READBUF];
+    let start = Instant::now();
+    let mut last_warning = Instant::now();
+    let mut next_warning = last_warning
+        .checked_add(Duration::from_secs(TIMEOUT))
+        .unwrap();
+    loop {
+        let timeout = {
+            // FIXME: When Rust 1.39.0 is out we can replace this mess with duration_since_checked.
+            let t = Instant::now();
+            if t > next_warning {
+                Duration::from_secs(1)
+            } else {
+                next_warning.duration_since(t)
+            }
+        };
+        if let Ok(_) = poll(&mut pollfds, Some(timeout)) {
+            if pollfds[0].revents & POLLIN == POLLIN {
+                while let Ok(i) = stderr.read(&mut buf) {
+                    if i == 0 {
+                        break;
+                    }
+                    let utf8 = str::from_utf8(&buf[..i]).unwrap_or_else(|_| {
+                        fatal(&format!("Can't convert stderr from '{:?}' into UTF-8", cmd))
+                    });
+                    cap_stderr.push_str(&utf8);
+                    if inner.nocapture {
+                        eprint!("{}", utf8);
+                    }
+                }
+            }
+
+            if pollfds[1].revents & POLLIN == POLLIN {
+                while let Ok(i) = stdout.read(&mut buf) {
+                    if i == 0 {
+                        break;
+                    }
+                    let utf8 = str::from_utf8(&buf[..i]).unwrap_or_else(|_| {
+                        fatal(&format!("Can't convert stdout from '{:?}' into UTF-8", cmd))
+                    });
+                    cap_stdout.push_str(&utf8);
+                    if inner.nocapture {
+                        print!("{}", utf8);
+                    }
+                }
+            }
+
+            if pollfds[0].revents & POLLHUP == POLLHUP && pollfds[1].revents & POLLHUP == POLLHUP {
+                break;
+            }
+        }
+
+        if Instant::now() >= next_warning {
+            let running_for = ((Instant::now() - start).as_secs() / TIMEOUT) * TIMEOUT;
+            if inner.test_threads == 1 {
+                eprint!("running for over {} seconds... ", running_for);
+            } else {
+                eprintln!(
+                    "\nlang_tests::{} ... has been running for over {} seconds",
+                    test_fname, running_for
+                );
+            }
+            last_warning = next_warning;
+            next_warning = last_warning
+                .checked_add(Duration::from_secs(TIMEOUT))
+                .unwrap();
+        }
+    }
+
+    let status = {
+        // We have no idea how long it will take the child process to exit. In practise, the mere
+        // act of yielding (via sleep) for a ridiculously short period of time will often be enough
+        // for the child process to exit. So we use an exponentially increasing timeout with a very
+        // short initial period so that, in the common case, we don't waste time waiting for
+        // something that's almost certainly already occurred.
+        let mut wait_timeout = INITIAL_WAIT_TIMEOUT;
+        loop {
+            match child.try_wait() {
+                Ok(Some(s)) => break s,
+                Ok(None) => (),
+                Err(e) => fatal(&format!("{:?} did not exit correctly: {:?}", cmd, e)),
+            }
+
+            if Instant::now() >= next_warning {
+                let running_for = ((Instant::now() - start).as_secs() / TIMEOUT) * TIMEOUT;
+                if inner.test_threads == 1 {
+                    eprint!("running for over {} seconds... ", running_for);
+                } else {
+                    eprintln!(
+                        "\nlang_tests::{} ... has been running for over {} seconds",
+                        test_fname, running_for
+                    );
+                }
+                last_warning = next_warning;
+                next_warning = last_warning
+                    .checked_add(Duration::from_secs(TIMEOUT))
+                    .unwrap();
+            }
+            sleep(Duration::from_nanos(wait_timeout));
+            wait_timeout *= 2;
+            if wait_timeout > MAX_WAIT_TIMEOUT {
+                wait_timeout = MAX_WAIT_TIMEOUT;
+            }
+        }
+    };
+    (status, cap_stderr, cap_stdout)
 }
