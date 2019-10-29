@@ -1,3 +1,14 @@
+# lang_tester 0.3.4 (2019-10-29)
+
+* Add support for `--nocapture` to better emulate `cargo test`. As with `cargo
+  test`, if you're running more than one test then `--nocapture` is generally
+  best paired with `--test-threads=1` to avoid confusing, multiplexed output to
+  the terminal.
+
+* Be clearer that tests can have defaults: notably commands default to `status:
+  success` unless overridden.
+
+
 # lang_tester 0.3.3 (2019-10-24)
 
 * Individual tests can now add extra arguments to an invoked command with the
