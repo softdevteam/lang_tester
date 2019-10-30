@@ -1,4 +1,4 @@
-# lang_tester 0.3.4 (2019-10-29)
+# lang_tester 0.3.4 (2019-10-30)
 
 * Add support for `--nocapture` to better emulate `cargo test`. As with `cargo
   test`, if you're running more than one test then `--nocapture` is generally
