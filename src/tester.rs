@@ -325,7 +325,7 @@ impl<'a> LangTester<'a> {
                 }
                 if let Some(ref stdout) = test.stdout {
                     eprintln!(
-                        "\n---- lang_tests::{} stdout ----\n'{}'\n",
+                        "\n---- lang_tests::{} stdout ----\n{}\n",
                         test_fname, stdout
                     );
                 }
