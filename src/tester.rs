@@ -40,7 +40,7 @@ const TIMEOUT: u64 = 60; // seconds
 /// small value, as most child processes will exit almost immediately.
 const INITIAL_WAIT_TIMEOUT: u64 = 10000; // nanoseconds
 /// The maximum time we should wait() between checking if a child process has exited.
-const MAX_WAIT_TIMEOUT: u64 = 250000000; // nanoseconds
+const MAX_WAIT_TIMEOUT: u64 = 250_000_000; // nanoseconds
 
 pub struct LangTester<'a> {
     test_dir: Option<&'a str>,
@@ -306,7 +306,7 @@ impl<'a> LangTester<'a> {
     /// Pretty print any failures to `stderr`.
     fn pp_failures(
         &self,
-        failures: &Vec<(String, TestFailure)>,
+        failures: &[(String, TestFailure)],
         test_files_len: usize,
         num_ignored: usize,
         num_filtered: usize,
@@ -462,9 +462,9 @@ fn run_tests(
                 handle
                     .set_color(ColorSpec::new().set_fg(Some(Color::Yellow)))
                     .ok();
-                handle.write_all("ignored".as_bytes()).ok();
+                handle.write_all(b"ignored").ok();
                 handle.reset().ok();
-                handle.write_all(" (test string is empty)".as_bytes()).ok();
+                handle.write_all(b" (test string is empty)").ok();
                 num_ignored += 1;
                 return;
             }
@@ -567,13 +567,13 @@ fn run_tests(
                     handle
                         .set_color(ColorSpec::new().set_fg(Some(Color::Red)))
                         .ok();
-                    handle.write_all("FAILED".as_bytes()).ok();
+                    handle.write_all(b"FAILED").ok();
                     handle.reset().ok();
                 } else {
                     handle
                         .set_color(ColorSpec::new().set_fg(Some(Color::Green)))
                         .ok();
-                    handle.write_all("ok".as_bytes()).ok();
+                    handle.write_all(b"ok").ok();
                     handle.reset().ok();
                 }
             }
@@ -639,7 +639,7 @@ fn run_cmd(
                 next_warning.duration_since(t)
             }
         };
-        if let Ok(_) = poll(&mut pollfds, Some(timeout)) {
+        if poll(&mut pollfds, Some(timeout)).is_ok() {
             if pollfds[0].revents & POLLIN == POLLIN {
                 while let Ok(i) = stderr.read(&mut buf) {
                     if i == 0 {
