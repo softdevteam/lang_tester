@@ -12,6 +12,7 @@ use std::{
     env,
     fs::read_to_string,
     io::{self, Read, Write},
+    os::unix::process::ExitStatusExt,
     path::{Path, PathBuf},
     process::{self, Command, ExitStatus},
     str,
@@ -511,16 +512,27 @@ fn run_tests(
                             Status::Success | Status::Error => {
                                 if status.success() {
                                     failure.status = Some("Success".to_owned());
+                                } else if status.code().is_none() {
+                                    failure.status = Some(
+                                        format!(
+                                            "Exited due to signal: {}",
+                                            status.signal().unwrap()
+                                        )
+                                        .to_owned(),
+                                    );
                                 } else {
                                     failure.status = Some("Error".to_owned());
                                 }
                             }
                             Status::Int(_) => {
                                 failure.status = Some(
-                                    status
-                                        .code()
-                                        .map(|x| x.to_string())
-                                        .unwrap_or_else(|| "Exited due to signal".to_owned()),
+                                    status.code().map(|x| x.to_string()).unwrap_or_else(|| {
+                                        format!(
+                                            "Exited due to signal: {}",
+                                            status.signal().unwrap()
+                                        )
+                                        .to_owned()
+                                    }),
                                 )
                             }
                         }
