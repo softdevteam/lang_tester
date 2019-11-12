@@ -362,6 +362,9 @@ pub(crate) enum Status {
     /// The command did not execute successfully (by whatever definition of "not successful" the
     /// running platform uses).
     Error,
+    /// The command terminated due to a signal. This option may not be available on all
+    /// platforms.
+    Signal,
     /// The command exited with a precise exit code. This option may not be available on all
     /// platforms.
     Int(i32),
@@ -497,6 +500,7 @@ fn run_tests(
                         meant_to_error = true;
                         !status.success()
                     }
+                    Status::Signal => status.signal().is_some(),
                     Status::Int(i) => status.code() == Some(i),
                 };
                 let pass_stderr = fuzzy::match_vec(&test.stderr, &stderr);
@@ -522,6 +526,15 @@ fn run_tests(
                                     );
                                 } else {
                                     failure.status = Some("Error".to_owned());
+                                }
+                            }
+                            Status::Signal => {
+                                if cfg!(unix) {
+                                    failure.status = Some("Did not exit due to signal".to_owned());
+                                } else {
+                                    failure.status = Some(
+                                        "Use of signal not supported on this platform".to_owned(),
+                                    )
                                 }
                             }
                             Status::Int(_) => {
