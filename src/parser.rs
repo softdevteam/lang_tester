@@ -61,6 +61,7 @@ pub(crate) fn parse_tests(test_str: &str) -> HashMap<String, TestCmd> {
                             let status = match val_str.to_lowercase().as_str() {
                                 "success" => Status::Success,
                                 "error" => Status::Error,
+                                "signal" => Status::Signal,
                                 x => {
                                     if let Ok(i) = x.parse::<i32>() {
                                         Status::Int(i)

@@ -354,7 +354,7 @@ impl<'a> LangTester<'a> {
 }
 
 /// The status of an executed command.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Status {
     /// The command exited successfully (by whatever definition of "successful" the running
     /// platform uses).
@@ -362,6 +362,9 @@ pub(crate) enum Status {
     /// The command did not execute successfully (by whatever definition of "not successful" the
     /// running platform uses).
     Error,
+    /// The command terminated due to a signal. This option may not be available on all
+    /// platforms.
+    Signal,
     /// The command exited with a precise exit code. This option may not be available on all
     /// platforms.
     Int(i32),
@@ -403,6 +406,24 @@ fn write_with_colour(s: &str, colour: Color) {
     stderr.set_color(ColorSpec::new().set_fg(Some(colour))).ok();
     io::stderr().write_all(s.as_bytes()).ok();
     stderr.reset().ok();
+}
+
+fn write_ignored(test_name: &str, message: &str, inner: Arc<LangTesterPooler>) {
+    // Grab a lock on stderr so that we can avoid the possibility of lines blurring
+    // together in confusing ways.
+    let stderr = StandardStream::stderr(ColorChoice::Always);
+    let mut handle = stderr.lock();
+    if inner.test_threads > 1 {
+        handle
+            .write_all(&format!("\ntest lang_tests::{} ... ", test_name).as_bytes())
+            .ok();
+    }
+    handle
+        .set_color(ColorSpec::new().set_fg(Some(Color::Yellow)))
+        .ok();
+    handle.write_all(b"ignored").ok();
+    handle.reset().ok();
+    handle.write_all(format!(" ({})", message).as_bytes()).ok();
 }
 
 fn usage() -> ! {
@@ -450,27 +471,30 @@ fn run_tests(
             let test_str = inner.test_extract.as_ref().unwrap()(&all_str).unwrap_or_else(|| {
                 fatal(&format!("Couldn't extract test string from {}", test_fname))
             });
+
             if test_str.is_empty() {
-                // Grab a lock on stderr so that we can avoid the possibility of lines blurring
-                // together in confusing ways.
-                let stderr = StandardStream::stderr(ColorChoice::Always);
-                let mut handle = stderr.lock();
-                if inner.test_threads > 1 {
-                    handle
-                        .write_all(&format!("\ntest lang_tests::{} ... ", test_fname).as_bytes())
-                        .ok();
-                }
-                handle
-                    .set_color(ColorSpec::new().set_fg(Some(Color::Yellow)))
-                    .ok();
-                handle.write_all(b"ignored").ok();
-                handle.reset().ok();
-                handle.write_all(b" (test string is empty)").ok();
+                write_ignored(test_fname.as_str(), "test string is empty", inner);
                 num_ignored += 1;
                 return;
             }
 
             let tests = parse_tests(&test_str);
+
+            if !cfg!(unix)
+                && tests
+                    .values()
+                    .find(|t| t.status == Status::Signal)
+                    .is_some()
+            {
+                write_ignored(
+                    test_fname.as_str(),
+                    "signal termination not supported on this platform",
+                    inner,
+                );
+                num_ignored += 1;
+                return;
+            }
+
             let cmd_pairs = inner.test_cmds.as_ref().unwrap()(p.as_path())
                 .into_iter()
                 .map(|(test_name, cmd)| (test_name.to_lowercase(), cmd))
@@ -497,6 +521,7 @@ fn run_tests(
                         meant_to_error = true;
                         !status.success()
                     }
+                    Status::Signal => status.signal().is_some(),
                     Status::Int(i) => status.code() == Some(i),
                 };
                 let pass_stderr = fuzzy::match_vec(&test.stderr, &stderr);
@@ -523,6 +548,9 @@ fn run_tests(
                                 } else {
                                     failure.status = Some("Error".to_owned());
                                 }
+                            }
+                            Status::Signal => {
+                                failure.status = Some("Exit was not due to signal".to_owned());
                             }
                             Status::Int(_) => {
                                 failure.status = Some(
