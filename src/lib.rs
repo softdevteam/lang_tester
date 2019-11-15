@@ -90,10 +90,11 @@
 //! most level of indentation defines alterations to the general command or sub-tests. Each test
 //! command must define at least one sub-test:
 //!
-//!   * `status: <success|failure|<int>>`, where `success` and `failure` map to platform specific
-//!     notions of a command completing successfully or unsuccessfully respectively and `<int>` is
-//!     a signed integer checking for a specific exit code on platforms that support it. If not
-//!     specified, defaults to `success`.
+//!   * `status: <success|failure|signal|<int>>`, where `success` and `failure` map to platform
+//!     specific notions of a command completing successfully or unsuccessfully respectively.
+//!     `signal` checks for termination due to a signal on Unix platforms; on non-Unix platforms, the
+//!     test will be ignored. `<int>` is a signed integer checking for a specific exit code on platforms
+//!     that support it. If not specified, defaults to `success`.
 //!   * `stderr: [<string>]`, `stdout: [<string>]` are matched strings against a command's `stderr`
 //!     or `stdout`. The special string `...` can be used as a simple wildcard: if a line consists
 //!     solely of `...`, it means "match zero or more lines"; if a line begins with `...`, it means
