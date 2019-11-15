@@ -1,3 +1,12 @@
+# lang_tester 0.3.5 (2019-11-15)
+
+* Add support for programs which terminated due to a signal. Users can now
+  specify `status: signal` to indicate that a test should exit due to a signal:
+  on platforms which do not support this (e.g. Windows), such tests are
+  ignored. Similarly, if a program was terminated due to a signal then, on
+  Unix, the user is informed of that after test failure.
+
+
 # lang_tester 0.3.4 (2019-10-30)
 
 * Add support for `--nocapture` to better emulate `cargo test`. As with `cargo
