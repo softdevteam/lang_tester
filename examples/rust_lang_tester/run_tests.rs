@@ -1,12 +1,3 @@
-// Copyright (c) 2019 King's College London created by the Software Development Team
-// <http://soft-dev.org/>
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0>, or the MIT license <LICENSE-MIT or
-// http://opensource.org/licenses/MIT>, or the UPL-1.0 license <http://opensource.org/licenses/UPL>
-// at your option. This file may not be copied, modified, or distributed except according to those
-// terms.
-
 //! This is an example lang_tester for Rust: it is a simplified version of the test framework that
 //! rustc uses. In essence, the first sequence of commented line(s) (note that other lines e.g.
 //! `#![feature(...)]` lines and the like are skipped) in the file describe the test.
