@@ -1,3 +1,9 @@
+# lang_tester 0.3.6 (2019-11-21)
+
+* License as dual Apache-2.0/MIT (instead of a more complex, and little
+  understood, triple license of Apache-2.0/MIT/UPL-1.0).
+
+
 # lang_tester 0.3.5 (2019-11-15)
 
 * Add support for programs which terminated due to a signal. Users can now
