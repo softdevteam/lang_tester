@@ -109,8 +109,8 @@
 //! A file's tests can be ignored entirely if a test command `ignore` is defined:
 //!
 //!   * `ignore: [<string>]`, specifies that this file should be ignored for the reason set out in
-//!     `<string>` (if any). When the test is run, `<string>` will be printed out to inform users
-//!     of the reason why the test is ignored.
+//!     `<string>` (if any). Note that `<string>` is purely for user information and has no effect
+//!     on the running of tests.
 //!
 //! `lang_tester`'s output is deliberately similar to Rust's normal testing output. Running the
 //! example `rust_lang_tester` in this crate produces the following output:
