@@ -86,7 +86,7 @@
 //!     `signal` checks for termination due to a signal on Unix platforms; on non-Unix platforms, the
 //!     test will be ignored. `<int>` is a signed integer checking for a specific exit code on platforms
 //!     that support it. If not specified, defaults to `success`.
-//!   * `stderr: [<string>]`, `stdout: [<string>]` are matched strings against a command's `stderr`
+//!   * `stderr: [<string>]`, `stdout: [<string>]` match `<string>` against a command's `stderr`
 //!     or `stdout`. The special string `...` can be used as a simple wildcard: if a line consists
 //!     solely of `...`, it means "match zero or more lines"; if a line begins with `...`, it means
 //!     "match the remainder of the line only"; if a line ends with `...`, it means "match the
