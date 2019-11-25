@@ -383,6 +383,12 @@ impl<'a> TestCmd<'a> {
     }
 }
 
+/// A collection of tests.
+pub(crate) enum Tests<'a> {
+    Ignore(String),
+    Tests(HashMap<String, TestCmd<'a>>),
+}
+
 /// If one or more parts of a `TestCmd` fail, the parts that fail are set to `Some(...)` in an
 /// instance of this struct.
 #[derive(Debug, PartialEq)]
@@ -469,143 +475,151 @@ fn run_tests(
                 return;
             }
 
-            let tests = parse_tests(&test_str);
-
-            if !cfg!(unix)
-                && tests
-                    .values()
-                    .find(|t| t.status == Status::Signal)
-                    .is_some()
-            {
-                write_ignored(
-                    test_fname.as_str(),
-                    "signal termination not supported on this platform",
-                    inner,
-                );
-                num_ignored += 1;
-                return;
-            }
-
-            let cmd_pairs = inner.test_cmds.as_ref().unwrap()(p.as_path())
-                .into_iter()
-                .map(|(test_name, cmd)| (test_name.to_lowercase(), cmd))
-                .collect::<Vec<_>>();
-            check_names(&cmd_pairs, &tests);
-
-            let mut failure = TestFailure {
-                status: None,
-                stderr: None,
-                stdout: None,
-            };
-            for (cmd_name, mut cmd) in cmd_pairs {
-                let default_test = TestCmd::default();
-                let test = tests.get(&cmd_name).unwrap_or(&default_test);
-                cmd.args(&test.args);
-                let (status, stderr, stdout) = run_cmd(inner.clone(), &test_fname, cmd);
-
-                let mut meant_to_error = false;
-
-                // First, check whether the tests passed.
-                let pass_status = match test.status {
-                    Status::Success => status.success(),
-                    Status::Error => {
-                        meant_to_error = true;
-                        !status.success()
-                    }
-                    Status::Signal => status.signal().is_some(),
-                    Status::Int(i) => status.code() == Some(i),
-                };
-                let pass_stderr = fuzzy::match_vec(&test.stderr, &stderr);
-                let pass_stdout = fuzzy::match_vec(&test.stdout, &stdout);
-
-                // Second, if a test failed, we want to print out everything which didn't match
-                // successfully (i.e. if the stderr test failed, print that out; but, equally, if
-                // stderr wasn't specified as a test, print it out, because the user can't
-                // otherwise know what it contains).
-                if !(pass_status && pass_stderr && pass_stdout) {
-                    if !pass_status || failure.status.is_none() {
-                        match test.status {
-                            Status::Success | Status::Error => {
-                                if status.success() {
-                                    failure.status = Some("Success".to_owned());
-                                } else if status.code().is_none() {
-                                    failure.status = Some(
-                                        format!(
-                                            "Exited due to signal: {}",
-                                            status.signal().unwrap()
-                                        )
-                                        .to_owned(),
-                                    );
-                                } else {
-                                    failure.status = Some("Error".to_owned());
-                                }
-                            }
-                            Status::Signal => {
-                                failure.status = Some("Exit was not due to signal".to_owned());
-                            }
-                            Status::Int(_) => {
-                                failure.status = Some(
-                                    status.code().map(|x| x.to_string()).unwrap_or_else(|| {
-                                        format!(
-                                            "Exited due to signal: {}",
-                                            status.signal().unwrap()
-                                        )
-                                        .to_owned()
-                                    }),
-                                )
-                            }
-                        }
+            match parse_tests(&test_str) {
+                Tests::Ignore(s) => write_ignored(test_fname.as_str(), &s, inner),
+                Tests::Tests(tests) => {
+                    if !cfg!(unix)
+                        && tests
+                            .values()
+                            .find(|t| t.status == Status::Signal)
+                            .is_some()
+                    {
+                        write_ignored(
+                            test_fname.as_str(),
+                            "signal termination not supported on this platform",
+                            inner,
+                        );
+                        num_ignored += 1;
+                        return;
                     }
 
-                    if !pass_stderr || failure.stderr.is_none() {
-                        failure.stderr = Some(stderr);
-                    }
+                    let cmd_pairs = inner.test_cmds.as_ref().unwrap()(p.as_path())
+                        .into_iter()
+                        .map(|(test_name, cmd)| (test_name.to_lowercase(), cmd))
+                        .collect::<Vec<_>>();
+                    check_names(&cmd_pairs, &tests);
 
-                    if !pass_stdout || failure.stdout.is_none() {
-                        failure.stdout = Some(stdout);
-                    }
-
-                    // If a sub-test failed, bail out immediately, otherwise subsequent sub-tests
-                    // will overwrite the failure output!
-                    break;
-                }
-
-                // If a command failed, and we weren't expecting it to, bail out immediately.
-                if !status.success() && meant_to_error {
-                    break;
-                }
-            }
-
-            {
-                // Grab a lock on stderr so that we can avoid the possibility of lines blurring
-                // together in confusing ways.
-                let stderr = StandardStream::stderr(ColorChoice::Always);
-                let mut handle = stderr.lock();
-                if inner.test_threads > 1 {
-                    handle
-                        .write_all(&format!("\ntest lang_tests::{} ... ", test_fname).as_bytes())
-                        .ok();
-                }
-                if failure
-                    != (TestFailure {
+                    let mut failure = TestFailure {
                         status: None,
                         stderr: None,
                         stdout: None,
-                    })
-                {
-                    let mut failures = failures.lock().unwrap();
-                    failures.push((test_fname, failure));
-                    handle
-                        .set_color(ColorSpec::new().set_fg(Some(Color::Red)))
-                        .ok();
-                    handle.write_all(b"FAILED").ok();
-                    handle.reset().ok();
-                } else {
-                    handle
-                        .set_color(ColorSpec::new().set_fg(Some(Color::Green)))
-                        .ok();
-                    handle.write_all(b"ok").ok();
-                    handle.reset().ok();
+                    };
+                    for (cmd_name, mut cmd) in cmd_pairs {
+                        let default_test = TestCmd::default();
+                        let test = tests.get(&cmd_name).unwrap_or(&default_test);
+                        cmd.args(&test.args);
+                        let (status, stderr, stdout) = run_cmd(inner.clone(), &test_fname, cmd);
+
+                        let mut meant_to_error = false;
+
+                        // First, check whether the tests passed.
+                        let pass_status = match test.status {
+                            Status::Success => status.success(),
+                            Status::Error => {
+                                meant_to_error = true;
+                                !status.success()
+                            }
+                            Status::Signal => status.signal().is_some(),
+                            Status::Int(i) => status.code() == Some(i),
+                        };
+                        let pass_stderr = fuzzy::match_vec(&test.stderr, &stderr);
+                        let pass_stdout = fuzzy::match_vec(&test.stdout, &stdout);
+
+                        // Second, if a test failed, we want to print out everything which didn't match
+                        // successfully (i.e. if the stderr test failed, print that out; but, equally, if
+                        // stderr wasn't specified as a test, print it out, because the user can't
+                        // otherwise know what it contains).
+                        if !(pass_status && pass_stderr && pass_stdout) {
+                            if !pass_status || failure.status.is_none() {
+                                match test.status {
+                                    Status::Success | Status::Error => {
+                                        if status.success() {
+                                            failure.status = Some("Success".to_owned());
+                                        } else if status.code().is_none() {
+                                            failure.status = Some(
+                                                format!(
+                                                    "Exited due to signal: {}",
+                                                    status.signal().unwrap()
+                                                )
+                                                .to_owned(),
+                                            );
+                                        } else {
+                                            failure.status = Some("Error".to_owned());
+                                        }
+                                    }
+                                    Status::Signal => {
+                                        failure.status =
+                                            Some("Exit was not due to signal".to_owned());
+                                    }
+                                    Status::Int(_) => {
+                                        failure.status = Some(
+                                            status.code().map(|x| x.to_string()).unwrap_or_else(
+                                                || {
+                                                    format!(
+                                                        "Exited due to signal: {}",
+                                                        status.signal().unwrap()
+                                                    )
+                                                    .to_owned()
+                                                },
+                                            ),
+                                        )
+                                    }
+                                }
+                            }
+
+                            if !pass_stderr || failure.stderr.is_none() {
+                                failure.stderr = Some(stderr);
+                            }
+
+                            if !pass_stdout || failure.stdout.is_none() {
+                                failure.stdout = Some(stdout);
+                            }
+
+                            // If a sub-test failed, bail out immediately, otherwise subsequent sub-tests
+                            // will overwrite the failure output!
+                            break;
+                        }
+
+                        // If a command failed, and we weren't expecting it to, bail out immediately.
+                        if !status.success() && meant_to_error {
+                            break;
+                        }
+                    }
+
+                    {
+                        // Grab a lock on stderr so that we can avoid the possibility of lines blurring
+                        // together in confusing ways.
+                        let stderr = StandardStream::stderr(ColorChoice::Always);
+                        let mut handle = stderr.lock();
+                        if inner.test_threads > 1 {
+                            handle
+                                .write_all(
+                                    &format!("\ntest lang_tests::{} ... ", test_fname).as_bytes(),
+                                )
+                                .ok();
+                        }
+                        if failure
+                            != (TestFailure {
+                                status: None,
+                                stderr: None,
+                                stdout: None,
+                            })
+                        {
+                            let mut failures = failures.lock().unwrap();
+                            failures.push((test_fname, failure));
+                            handle
+                                .set_color(ColorSpec::new().set_fg(Some(Color::Red)))
+                                .ok();
+                            handle.write_all(b"FAILED").ok();
+                            handle.reset().ok();
+                        } else {
+                            handle
+                                .set_color(ColorSpec::new().set_fg(Some(Color::Green)))
+                                .ok();
+                            handle.write_all(b"ok").ok();
+                            handle.reset().ok();
+                        }
+                    }
                 }
             }
         });
