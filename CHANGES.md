@@ -1,3 +1,12 @@
+# lang_tester 0.3.7 (2019-11-26)
+
+* Add support for ignorable tests. A test command `ignore:`  is interpreted as
+  causing that entire test file to be ignored. As with `cargo test`, such tests
+  can be run with the `--ignored` switch.
+
+* Fix a bug whereby the number of ignored tests was incorrectly reported.
+
+
 # lang_tester 0.3.6 (2019-11-21)
 
 * License as dual Apache-2.0/MIT (instead of a more complex, and little
