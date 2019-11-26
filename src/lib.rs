@@ -158,7 +158,6 @@
 //!
 //! Running `cargo test` will now also run your lang tests.
 
-#![allow(clippy::needless_doctest_main)]
 #![allow(clippy::new_without_default)]
 #![allow(clippy::redundant_closure)]
 #![allow(clippy::type_complexity)]
