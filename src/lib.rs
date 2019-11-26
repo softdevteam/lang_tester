@@ -86,7 +86,7 @@
 //!     `signal` checks for termination due to a signal on Unix platforms; on non-Unix platforms, the
 //!     test will be ignored. `<int>` is a signed integer checking for a specific exit code on platforms
 //!     that support it. If not specified, defaults to `success`.
-//!   * `stderr: [<string>]`, `stdout: [<string>]` are matched strings against a command's `stderr`
+//!   * `stderr: [<string>]`, `stdout: [<string>]` match `<string>` against a command's `stderr`
 //!     or `stdout`. The special string `...` can be used as a simple wildcard: if a line consists
 //!     solely of `...`, it means "match zero or more lines"; if a line begins with `...`, it means
 //!     "match the remainder of the line only"; if a line ends with `...`, it means "match the
@@ -105,6 +105,12 @@
 //! defaults: the `Compiler` should succeed (e.g.  return a `0` exit code when run on Unix), and
 //! its `stderr` output should warn about an unused variable on line 12; and the resulting binary
 //! should succeed produce `Hello world` on `stdout`.
+//!
+//! A file's tests can be ignored entirely if a test command `ignore` is defined:
+//!
+//!   * `ignore: [<string>]`, specifies that this file should be ignored for the reason set out in
+//!     `<string>` (if any). Note that `<string>` is purely for user information and has no effect
+//!     on the running of tests.
 //!
 //! `lang_tester`'s output is deliberately similar to Rust's normal testing output. Running the
 //! example `rust_lang_tester` in this crate produces the following output:

@@ -2,14 +2,15 @@ use std::collections::hash_map::{Entry, HashMap};
 
 use crate::{
     fatal,
-    tester::{Status, TestCmd},
+    tester::{Status, TestCmd, Tests},
 };
 
 /// Parse test data into a set of `Test`s.
-pub(crate) fn parse_tests(test_str: &str) -> HashMap<String, TestCmd> {
+pub(crate) fn parse_tests(test_str: &str) -> Tests {
     let lines = test_str.lines().collect::<Vec<_>>();
     let mut tests = HashMap::new();
     let mut line_off = 0;
+    let mut ignore = false;
     while line_off < lines.len() {
         let indent = indent_level(&lines, line_off);
         if indent == lines[line_off].len() {
@@ -17,6 +18,11 @@ pub(crate) fn parse_tests(test_str: &str) -> HashMap<String, TestCmd> {
             continue;
         }
         let (test_name, val) = key_val(&lines, line_off, indent);
+        if test_name == "ignore" {
+            ignore = true;
+            line_off += 1;
+            continue;
+        }
         if !val.is_empty() {
             fatal(&format!(
                 "Test name '{}' can't have a value on line {}.",
@@ -79,7 +85,7 @@ pub(crate) fn parse_tests(test_str: &str) -> HashMap<String, TestCmd> {
             }
         }
     }
-    tests
+    Tests { ignore, tests }
 }
 
 fn indent_level(lines: &[&str], line_off: usize) -> usize {
