@@ -510,12 +510,7 @@ fn run_tests<'a>(
 ) -> bool {
     let test_fname = path.file_stem().unwrap().to_str().unwrap().to_owned();
 
-    if !cfg!(unix)
-        && tests
-            .values()
-            .find(|t| t.status == Status::Signal)
-            .is_some()
-    {
+    if !cfg!(unix) && tests.values().any(|t| t.status == Status::Signal) {
         write_ignored(
             test_fname.as_str(),
             "signal termination not supported on this platform",
@@ -567,10 +562,10 @@ fn run_tests<'a>(
                         if status.success() {
                             failure.status = Some("Success".to_owned());
                         } else if status.code().is_none() {
-                            failure.status = Some(
-                                format!("Exited due to signal: {}", status.signal().unwrap())
-                                    .to_owned(),
-                            );
+                            failure.status = Some(format!(
+                                "Exited due to signal: {}",
+                                status.signal().unwrap()
+                            ));
                         } else {
                             failure.status = Some("Error".to_owned());
                         }
@@ -582,7 +577,6 @@ fn run_tests<'a>(
                         failure.status =
                             Some(status.code().map(|x| x.to_string()).unwrap_or_else(|| {
                                 format!("Exited due to signal: {}", status.signal().unwrap())
-                                    .to_owned()
                             }))
                     }
                 }
