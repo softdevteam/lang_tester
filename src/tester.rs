@@ -7,7 +7,10 @@ use std::{
     path::{Path, PathBuf},
     process::{self, Command, ExitStatus},
     str,
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc, Mutex,
+    },
     thread::sleep,
     time::{Duration, Instant},
 };
@@ -460,11 +463,12 @@ fn test_file(
     inner: Arc<LangTesterPooler>,
 ) -> (Vec<(String, TestFailure)>, usize) {
     let failures = Arc::new(Mutex::new(Vec::new()));
-    let mut num_ignored = 0;
+    let num_ignored = Arc::new(AtomicUsize::new(0));
     let pool = ThreadPool::new(inner.test_threads);
     for p in test_files {
         let test_fname = p.file_stem().unwrap().to_str().unwrap().to_owned();
 
+        let num_ignored = num_ignored.clone();
         let failures = failures.clone();
         let inner = inner.clone();
         pool.execute(move || {
@@ -479,26 +483,26 @@ fn test_file(
 
             if test_str.is_empty() {
                 write_ignored(test_fname.as_str(), "test string is empty", inner);
-                num_ignored += 1;
+                num_ignored.fetch_add(1, Ordering::Relaxed);
                 return;
             }
 
             let tests = parse_tests(&test_str);
             if (inner.ignored && !tests.ignore) || (!inner.ignored && tests.ignore) {
                 write_ignored(test_fname.as_str(), "", inner);
-                num_ignored += 1;
+                num_ignored.fetch_add(1, Ordering::Relaxed);
                 return;
             }
 
             if run_tests(Arc::clone(&inner), tests.tests, p, failures) {
-                num_ignored += 1;
+                num_ignored.fetch_add(1, Ordering::Relaxed);
             }
         });
     }
     pool.join();
     let failures = Mutex::into_inner(Arc::try_unwrap(failures).unwrap()).unwrap();
 
-    (failures, num_ignored)
+    (failures, Arc::try_unwrap(num_ignored).unwrap().into_inner())
 }
 
 /// Run the tests for `path`.
