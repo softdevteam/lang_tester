@@ -691,7 +691,7 @@ fn run_cmd(
             }
         };
 
-        if !poll(pollfds.as_mut_slice(), Some(timeout)).is_some() {
+        if !poll(pollfds.as_mut_slice(), Some(timeout)).is_ok() {
             continue;
         }
 
@@ -699,7 +699,9 @@ fn run_cmd(
         // do that while iterating over it, so we make a copy.
         // Since we may want to remove an entry, we process the
         // entries in reverse order so that the indices remain stable
-        for (idx, item) in pollfds.cloned().iter().rev().enumerate() {
+
+        for i in (0..pollfds.len()).rev() {
+            let item = pollfds[i];
             if item.revents == 0 {
                 // Nothing ready
                 continue;
@@ -715,13 +717,10 @@ fn run_cmd(
             let mut buf = [0u8; READBUF];
             match pipe.read(&mut buf) {
                 // EOF
-                Some(0) => pollfds.remove(idx),
-                // Stop reading a stream if we encounter an error on it
-                Err(err) => {
-                    eprintln!("Error reading from child:{}", err);
-                    pollfds.remove(idx);
-                }
-                Some(n) => {
+                Ok(0) => {
+                    pollfds.remove(i);
+                },
+                Ok(n) => {
                     let buf = &buf[..n];
                     target_buf.extend_from_slice(buf);
                     if inner.nocapture {
@@ -733,7 +732,13 @@ fn run_cmd(
                             std::io::stderr().write_all(buf).unwrap();
                         }
                     }
+                },
+                // Stop reading a stream if we encounter an error on it
+                Err(err) => {
+                    eprintln!("Error reading from child:{}", err);
+                    pollfds.remove(i);
                 }
+
             }
         }
     }
