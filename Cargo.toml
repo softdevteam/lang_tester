@@ -16,6 +16,7 @@ path = "examples/rust_lang_tester/run_tests.rs"
 [dependencies]
 filedescriptor = "0.5"
 getopts = "0.2"
+nix = "0.16.0"
 num_cpus = "1.10"
 termcolor = "1.0"
 threadpool = "1.7"

@@ -15,10 +15,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use filedescriptor::{
-    poll, pollfd, FileDescriptor, IntoRawSocketDescriptor, POLLERR, POLLHUP, POLLIN,
-};
+use filedescriptor::{poll, pollfd, AsRawSocketDescriptor, FileDescriptor, POLLHUP, POLLIN};
 use getopts::Options;
+use nix::fcntl::{fcntl, FcntlArg::F_SETFL, OFlag};
 use num_cpus;
 use termcolor::{Color, ColorChoice, ColorSpec, StandardStream, WriteColor};
 use threadpool::ThreadPool;
@@ -646,11 +645,6 @@ fn run_cmd(
     test_fname: &str,
     mut cmd: Command,
 ) -> (ExitStatus, String, String) {
-    // The basic sequence here is:
-    //   1) Spawn the command
-    //   2) Read everything from stderr & stdout until they are both disconnected
-    //   3) wait() for the command to finish
-
     let mut child = cmd
         .stderr(process::Stdio::piped())
         .stdout(process::Stdio::piped())
@@ -658,34 +652,37 @@ fn run_cmd(
         .spawn()
         .unwrap_or_else(|_| fatal(&format!("Couldn't run command {:?}.", cmd)));
 
-    let mut stderr = FileDescriptor::dup(child.stderr.as_ref().unwrap()).unwrap();
     let mut stdout = FileDescriptor::dup(child.stdout.as_ref().unwrap()).unwrap();
+    let mut stderr = FileDescriptor::dup(child.stderr.as_ref().unwrap()).unwrap();
 
-    let mut cap_stderr = String::new();
-    let mut cap_stdout = String::new();
-    let mut pollfds = [
+    fcntl(stdout.as_socket_descriptor(), F_SETFL(OFlag::O_NONBLOCK))
+        .unwrap_or_else(|_| fatal(&format!("Couldn't perform non-blocking on stdout.")));
+    fcntl(stderr.as_socket_descriptor(), F_SETFL(OFlag::O_NONBLOCK))
+        .unwrap_or_else(|_| fatal(&format!("Couldn't perform non-blocking on stderr.")));
+
+    // Buffers to accumulate the child output
+    let mut output = Vec::new();
+    let mut error = Vec::new();
+
+    let mut pollfds = vec![
         pollfd {
-            fd: FileDescriptor::dup(&stderr)
-                .unwrap()
-                .into_socket_descriptor(),
-            events: POLLERR | POLLIN | POLLHUP,
+            fd: stdout.as_socket_descriptor(),
+            events: POLLIN | POLLHUP,
             revents: 0,
         },
         pollfd {
-            fd: FileDescriptor::dup(&stdout)
-                .unwrap()
-                .into_socket_descriptor(),
-            events: POLLERR | POLLIN | POLLHUP,
+            fd: stderr.as_socket_descriptor(),
+            events: POLLIN | POLLHUP,
             revents: 0,
         },
     ];
-    let mut buf = [0; READBUF];
+
     let start = Instant::now();
     let mut last_warning = Instant::now();
     let mut next_warning = last_warning
         .checked_add(Duration::from_secs(TIMEOUT))
         .unwrap();
-    loop {
+    while !pollfds.is_empty() {
         let timeout = {
             // FIXME: When Rust 1.39.0 is out we can replace this mess with duration_since_checked.
             let t = Instant::now();
@@ -695,58 +692,60 @@ fn run_cmd(
                 next_warning.duration_since(t)
             }
         };
-        if poll(&mut pollfds, Some(timeout)).is_ok() {
-            if pollfds[0].revents & POLLIN == POLLIN {
-                while let Ok(i) = stderr.read(&mut buf) {
-                    if i == 0 {
-                        break;
-                    }
-                    let utf8 = str::from_utf8(&buf[..i]).unwrap_or_else(|_| {
-                        fatal(&format!("Can't convert stderr from '{:?}' into UTF-8", cmd))
-                    });
-                    cap_stderr.push_str(&utf8);
-                    if inner.nocapture {
-                        eprint!("{}", utf8);
-                    }
-                }
-            }
 
-            if pollfds[1].revents & POLLIN == POLLIN {
-                while let Ok(i) = stdout.read(&mut buf) {
-                    if i == 0 {
-                        break;
-                    }
-                    let utf8 = str::from_utf8(&buf[..i]).unwrap_or_else(|_| {
-                        fatal(&format!("Can't convert stdout from '{:?}' into UTF-8", cmd))
-                    });
-                    cap_stdout.push_str(&utf8);
-                    if inner.nocapture {
-                        print!("{}", utf8);
-                    }
-                }
-            }
-
-            if pollfds[0].revents & POLLHUP == POLLHUP && pollfds[1].revents & POLLHUP == POLLHUP {
-                break;
-            }
+        if !poll(pollfds.as_mut_slice(), Some(timeout)).is_ok() {
+            continue;
         }
 
-        if Instant::now() >= next_warning {
-            let running_for = ((Instant::now() - start).as_secs() / TIMEOUT) * TIMEOUT;
-            if inner.test_threads == 1 {
-                eprint!("running for over {} seconds... ", running_for);
-            } else {
-                eprintln!(
-                    "\nlang_tests::{} ... has been running for over {} seconds",
-                    test_fname, running_for
-                );
+        // We want to mutate the `pollds` vector, but we can't
+        // do that while iterating over it, so we make a copy.
+        // Since we may want to remove an entry, we process the
+        // entries in reverse order so that the indices remain stable
+
+        for i in (0..pollfds.len()).rev() {
+            let item = pollfds[i];
+            if item.revents == 0 {
+                // Nothing ready
+                continue;
             }
-            last_warning = next_warning;
-            next_warning = last_warning
-                .checked_add(Duration::from_secs(TIMEOUT))
-                .unwrap();
+
+            // Figure out if this is stdout or stderr
+            let (pipe, target_buf, is_stdout) = if item.fd == stdout.as_socket_descriptor() {
+                (&mut stdout, &mut output, true)
+            } else {
+                (&mut stderr, &mut error, false)
+            };
+
+            let mut buf = [0u8; READBUF];
+            match pipe.read(&mut buf) {
+                // EOF
+                Ok(0) => {
+                    pollfds.remove(i);
+                }
+                Ok(n) => {
+                    let buf = &buf[..n];
+                    target_buf.extend_from_slice(buf);
+                    if inner.nocapture {
+                        // They want to print the data; pass through
+                        // to our out/error stream as appropriate
+                        if is_stdout {
+                            std::io::stdout().write_all(buf).unwrap();
+                        } else {
+                            std::io::stderr().write_all(buf).unwrap();
+                        }
+                    }
+                }
+                // Stop reading a stream if we encounter an error on it
+                Err(err) => {
+                    eprintln!("Error reading from child:{}", err);
+                    pollfds.remove(i);
+                }
+            }
         }
     }
+
+    let stdout = String::from_utf8(output).unwrap();
+    let stderr = String::from_utf8(error).unwrap();
 
     let status = {
         // We have no idea how long it will take the child process to exit. In practise, the mere
@@ -784,5 +783,6 @@ fn run_cmd(
             }
         }
     };
-    (status, cap_stderr, cap_stdout)
+
+    (status, stderr, stdout)
 }
