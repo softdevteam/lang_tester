@@ -653,10 +653,8 @@ fn run_cmd(
         .spawn()
         .unwrap_or_else(|_| fatal(&format!("Couldn't run command {:?}.", cmd)));
 
-    // Convert the pipes into FileDescriptor objects.
-    let mut stdout: FileDescriptor = child.stdout.into();
-    let mut stderr: FileDescriptor = child.stderr.into();
-
+ let mut stderr = FileDescriptor::dup(child.stderr.as_ref().unwrap()).unwrap(); 
+ let mut stdout = FileDescriptor::dup(child.stdout.as_ref().unwrap()).unwrap();
     // Buffers to accumulate the child output
     let mut output = Vec::new();
     let mut error = Vec::new();
