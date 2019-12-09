@@ -781,5 +781,5 @@ fn run_cmd(
         }
     };
 
-    (status, stdout, stderr)
+    (status, stderr, stdout)
 }
