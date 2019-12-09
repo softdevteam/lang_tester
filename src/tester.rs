@@ -686,7 +686,7 @@ fn run_cmd(
             }
         };
 
-        if !poll(pollfds.as_mut_slice(), Some(timeout)).is_ok() {
+        if !poll(pollfds.as_mut_slice(), Some(timeout)).is_err() {
             continue;
         }
 
