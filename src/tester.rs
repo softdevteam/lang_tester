@@ -15,9 +15,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use filedescriptor::{
-    poll, pollfd, FileDescriptor, POLLHUP, POLLIN, AsRawSocketDescriptor, IntoRawSocketDescriptor
-};
+use filedescriptor::{poll, pollfd, AsRawSocketDescriptor, FileDescriptor, POLLHUP, POLLIN};
 use getopts::Options;
 use num_cpus;
 use termcolor::{Color, ColorChoice, ColorSpec, StandardStream, WriteColor};
@@ -653,8 +651,8 @@ fn run_cmd(
         .spawn()
         .unwrap_or_else(|_| fatal(&format!("Couldn't run command {:?}.", cmd)));
 
- let mut stderr = FileDescriptor::dup(child.stderr.as_ref().unwrap()).unwrap(); 
- let mut stdout = FileDescriptor::dup(child.stdout.as_ref().unwrap()).unwrap();
+    let mut stderr = FileDescriptor::dup(child.stderr.as_ref().unwrap()).unwrap();
+    let mut stdout = FileDescriptor::dup(child.stdout.as_ref().unwrap()).unwrap();
     // Buffers to accumulate the child output
     let mut output = Vec::new();
     let mut error = Vec::new();
@@ -678,7 +676,6 @@ fn run_cmd(
         .checked_add(Duration::from_secs(TIMEOUT))
         .unwrap();
     while !pollfds.is_empty() {
-
         let timeout = {
             // FIXME: When Rust 1.39.0 is out we can replace this mess with duration_since_checked.
             let t = Instant::now();
@@ -717,7 +714,7 @@ fn run_cmd(
                 // EOF
                 Ok(0) => {
                     pollfds.remove(i);
-                },
+                }
                 Ok(n) => {
                     let buf = &buf[..n];
                     target_buf.extend_from_slice(buf);
@@ -730,19 +727,18 @@ fn run_cmd(
                             std::io::stderr().write_all(buf).unwrap();
                         }
                     }
-                },
+                }
                 // Stop reading a stream if we encounter an error on it
                 Err(err) => {
                     eprintln!("Error reading from child:{}", err);
                     pollfds.remove(i);
                 }
-
             }
         }
     }
 
     let stdout = String::from_utf8(output).unwrap();
-    let stderr = String::from_utf8(error).unwrap(); 
+    let stderr = String::from_utf8(error).unwrap();
 
     let status = {
         // We have no idea how long it will take the child process to exit. In practise, the mere
