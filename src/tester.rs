@@ -17,6 +17,7 @@ use std::{
 
 use filedescriptor::{poll, pollfd, AsRawSocketDescriptor, FileDescriptor, POLLHUP, POLLIN};
 use getopts::Options;
+use nix::fcntl::{fcntl, FcntlArg::F_SETFL, OFlag};
 use num_cpus;
 use termcolor::{Color, ColorChoice, ColorSpec, StandardStream, WriteColor};
 use threadpool::ThreadPool;
@@ -651,8 +652,14 @@ fn run_cmd(
         .spawn()
         .unwrap_or_else(|_| fatal(&format!("Couldn't run command {:?}.", cmd)));
 
-    let mut stderr = FileDescriptor::dup(child.stderr.as_ref().unwrap()).unwrap();
     let mut stdout = FileDescriptor::dup(child.stdout.as_ref().unwrap()).unwrap();
+    let mut stderr = FileDescriptor::dup(child.stderr.as_ref().unwrap()).unwrap();
+
+    fcntl(stdout.as_socket_descriptor(), F_SETFL(OFlag::O_NONBLOCK))
+        .unwrap_or_else(|_| fatal(&format!("Couldn't perform non-blocking on stdout.")));
+    fcntl(stderr.as_socket_descriptor(), F_SETFL(OFlag::O_NONBLOCK))
+        .unwrap_or_else(|_| fatal(&format!("Couldn't perform non-blocking on stderr.")));
+
     // Buffers to accumulate the child output
     let mut output = Vec::new();
     let mut error = Vec::new();
@@ -686,7 +693,7 @@ fn run_cmd(
             }
         };
 
-        if !poll(pollfds.as_mut_slice(), Some(timeout)).is_err() {
+        if !poll(pollfds.as_mut_slice(), Some(timeout)).is_ok() {
             continue;
         }
 
