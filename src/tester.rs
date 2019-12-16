@@ -16,9 +16,15 @@ use std::{
 };
 
 use filedescriptor::{
-    poll, pollfd, FileDescriptor, IntoRawSocketDescriptor, POLLERR, POLLHUP, POLLIN,
+    poll, pollfd, AsRawSocketDescriptor, FileDescriptor, IntoRawSocketDescriptor, POLLERR, POLLHUP,
+    POLLIN,
 };
 use getopts::Options;
+use nix::fcntl::{
+    fcntl,
+    FcntlArg::{F_GETFL, F_SETFL},
+    OFlag,
+};
 use num_cpus;
 use termcolor::{Color, ColorChoice, ColorSpec, StandardStream, WriteColor};
 use threadpool::ThreadPool;
@@ -661,6 +667,9 @@ fn run_cmd(
     let mut stderr = FileDescriptor::dup(child.stderr.as_ref().unwrap()).unwrap();
     let mut stdout = FileDescriptor::dup(child.stdout.as_ref().unwrap()).unwrap();
 
+    non_blocking(&stderr, &stdout)
+        .unwrap_or_else(|_| fatal("Couldn't set stderr and stdout to be non-blocking."));
+
     let mut cap_stderr = String::new();
     let mut cap_stdout = String::new();
     let mut pollfds = [
@@ -785,4 +794,26 @@ fn run_cmd(
         }
     };
     (status, cap_stderr, cap_stdout)
+}
+
+fn non_blocking(
+    stdout: &FileDescriptor,
+    stderr: &FileDescriptor,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let stdout_fd = stdout.as_socket_descriptor();
+    let stderr_fd = stderr.as_socket_descriptor();
+
+    let flags = fcntl(stdout_fd, F_GETFL)?;
+    fcntl(
+        stdout_fd,
+        F_SETFL(OFlag::from_bits_truncate(flags) | OFlag::O_NONBLOCK),
+    )?;
+
+    let flags = fcntl(stderr_fd, F_GETFL)?;
+    fcntl(
+        stderr_fd,
+        F_SETFL(OFlag::from_bits_truncate(flags) | OFlag::O_NONBLOCK),
+    )?;
+
+    Ok(())
 }
