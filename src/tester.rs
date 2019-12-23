@@ -1,9 +1,13 @@
 use std::{
     collections::{hash_map::HashMap, HashSet},
+    convert::TryFrom,
     env,
     fs::read_to_string,
     io::{self, Read, Write},
-    os::unix::process::ExitStatusExt,
+    os::{
+        raw::c_int,
+        unix::{io::AsRawFd, process::ExitStatusExt},
+    },
     path::{Path, PathBuf},
     process::{self, Command, ExitStatus},
     str,
@@ -15,12 +19,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use filedescriptor::{
-    poll, pollfd, AsRawSocketDescriptor, FileDescriptor, IntoRawSocketDescriptor, POLLERR, POLLHUP,
-    POLLIN,
-};
 use getopts::Options;
-use libc::{fcntl, F_GETFL, F_SETFL, O_NONBLOCK};
+use libc::{fcntl, poll, pollfd, F_GETFL, F_SETFL, O_NONBLOCK, POLLERR, POLLHUP, POLLIN};
 use num_cpus;
 use termcolor::{Color, ColorChoice, ColorSpec, StandardStream, WriteColor};
 use threadpool::ThreadPool;
@@ -660,10 +660,13 @@ fn run_cmd(
         .spawn()
         .unwrap_or_else(|_| fatal(&format!("Couldn't run command {:?}.", cmd)));
 
-    let mut stderr = FileDescriptor::dup(child.stderr.as_ref().unwrap()).unwrap();
-    let mut stdout = FileDescriptor::dup(child.stdout.as_ref().unwrap()).unwrap();
-    if set_nonblock(&stderr)
-        .and_then(|_| set_nonblock(&stdout))
+    let stderr = child.stderr.as_mut().unwrap();
+    let stdout = child.stdout.as_mut().unwrap();
+
+    let stderr_fd = stderr.as_raw_fd();
+    let stdout_fd = stdout.as_raw_fd();
+    if set_nonblock(stderr_fd)
+        .and_then(|_| set_nonblock(stdout_fd))
         .is_err()
     {
         fatal("Couldn't set stderr and/or stdout to be non-blocking");
@@ -673,16 +676,12 @@ fn run_cmd(
     let mut cap_stdout = String::new();
     let mut pollfds = [
         pollfd {
-            fd: FileDescriptor::dup(&stderr)
-                .unwrap()
-                .into_socket_descriptor(),
+            fd: stderr_fd,
             events: POLLERR | POLLIN | POLLHUP,
             revents: 0,
         },
         pollfd {
-            fd: FileDescriptor::dup(&stdout)
-                .unwrap()
-                .into_socket_descriptor(),
+            fd: stdout_fd,
             events: POLLERR | POLLIN | POLLHUP,
             revents: 0,
         },
@@ -694,42 +693,38 @@ fn run_cmd(
         .checked_add(Duration::from_secs(TIMEOUT))
         .unwrap();
     loop {
-        let timeout = {
-            // FIXME: When Rust 1.39.0 is out we can replace this mess with duration_since_checked.
-            let t = Instant::now();
-            if t > next_warning {
-                Duration::from_secs(1)
-            } else {
-                next_warning.duration_since(t)
-            }
-        };
-        if poll(&mut pollfds, Some(timeout)).is_ok() {
+        let timeout = i32::try_from(
+            next_warning
+                .checked_duration_since(Instant::now())
+                .map(|d| d.as_millis())
+                .unwrap_or(1000),
+        )
+        .unwrap_or(1000);
+        if unsafe { poll((&mut pollfds) as *mut _ as *mut pollfd, 2, timeout) } != -1 {
             if pollfds[0].revents & POLLIN == POLLIN {
-                while let Ok(i) = stderr.read(&mut buf) {
-                    if i == 0 {
-                        break;
-                    }
-                    let utf8 = str::from_utf8(&buf[..i]).unwrap_or_else(|_| {
-                        fatal(&format!("Can't convert stderr from '{:?}' into UTF-8", cmd))
-                    });
-                    cap_stderr.push_str(&utf8);
-                    if inner.nocapture {
-                        eprint!("{}", utf8);
+                if let Ok(i) = stderr.read(&mut buf) {
+                    if i > 0 {
+                        let utf8 = str::from_utf8(&buf[..i]).unwrap_or_else(|_| {
+                            fatal(&format!("Can't convert stderr from '{:?}' into UTF-8", cmd))
+                        });
+                        cap_stderr.push_str(&utf8);
+                        if inner.nocapture {
+                            eprint!("{}", utf8);
+                        }
                     }
                 }
             }
 
             if pollfds[1].revents & POLLIN == POLLIN {
-                while let Ok(i) = stdout.read(&mut buf) {
-                    if i == 0 {
-                        break;
-                    }
-                    let utf8 = str::from_utf8(&buf[..i]).unwrap_or_else(|_| {
-                        fatal(&format!("Can't convert stdout from '{:?}' into UTF-8", cmd))
-                    });
-                    cap_stdout.push_str(&utf8);
-                    if inner.nocapture {
-                        print!("{}", utf8);
+                if let Ok(i) = stdout.read(&mut buf) {
+                    if i > 0 {
+                        let utf8 = str::from_utf8(&buf[..i]).unwrap_or_else(|_| {
+                            fatal(&format!("Can't convert stdout from '{:?}' into UTF-8", cmd))
+                        });
+                        cap_stdout.push_str(&utf8);
+                        if inner.nocapture {
+                            print!("{}", utf8);
+                        }
                     }
                 }
             }
@@ -795,9 +790,7 @@ fn run_cmd(
     (status, cap_stderr, cap_stdout)
 }
 
-fn set_nonblock(fd: &FileDescriptor) -> Result<(), io::Error> {
-    let fd = fd.as_socket_descriptor();
-
+fn set_nonblock(fd: c_int) -> Result<(), io::Error> {
     let flags = unsafe { fcntl(fd, F_GETFL) };
     if flags == -1 || unsafe { fcntl(fd, F_SETFL, flags | O_NONBLOCK) } == -1 {
         return Err(io::Error::last_os_error());

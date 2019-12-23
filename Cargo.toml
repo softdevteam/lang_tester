@@ -14,7 +14,6 @@ name = "rust_lang_tester"
 path = "examples/rust_lang_tester/run_tests.rs"
 
 [dependencies]
-filedescriptor = "0.5"
 getopts = "0.2"
 libc = "0.2"
 num_cpus = "1.10"
