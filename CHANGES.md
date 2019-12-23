@@ -1,3 +1,8 @@
+# lang_tester 0.3.8 (2019-12-24)
+
+* Fix bug on OS X where input from sub-processes blocked forever.
+
+
 # lang_tester 0.3.7 (2019-11-26)
 
 * Add support for ignorable tests. A test command `ignore:`  is interpreted as
