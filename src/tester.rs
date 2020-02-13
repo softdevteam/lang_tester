@@ -85,6 +85,14 @@ impl<'a> LangTester<'a> {
         self
     }
 
+    /// Specify the number of simultaneous running test cases. Defaults to using
+    /// all available CPUs.
+    pub fn test_threads(&'a mut self, test_threads: usize) -> &'a mut Self {
+        let inner = Arc::get_mut(&mut self.inner).unwrap();
+        inner.test_threads = test_threads;
+        self
+    }
+
     /// If `test_file_filter` is specified, only files for which it returns `true` will be
     /// considered tests. A common use of this is to filter files based on filename extensions
     /// e.g.:
