@@ -108,7 +108,7 @@ fn key_val<'a>(lines: &[&'a str], line_off: usize, indent: usize) -> (&'a str, &
         .chars()
         .take_while(|c| c.is_whitespace())
         .count();
-    match line[content_start..].chars().nth(0) {
+    match line[content_start..].chars().next() {
         Some(':') => content_start += ':'.len_utf8(),
         _ => fatal(&format!(
             "Invalid key terminator at line {}.\n  {}",

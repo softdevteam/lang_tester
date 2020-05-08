@@ -21,7 +21,6 @@ use std::{
 
 use getopts::Options;
 use libc::{fcntl, poll, pollfd, F_GETFL, F_SETFL, O_NONBLOCK, POLLERR, POLLHUP, POLLIN};
-use num_cpus;
 use termcolor::{Color, ColorChoice, ColorSpec, StandardStream, WriteColor};
 use threadpool::ThreadPool;
 use walkdir::WalkDir;
