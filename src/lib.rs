@@ -11,12 +11,12 @@
 //! use std::{path::PathBuf, process::Command};
 //!
 //! use lang_tester::LangTester;
-//! use tempdir::TempDir;
+//! use tempfile::TempDir;
 //!
 //! fn main() {
 //!     // We use rustc to compile files into a binary: we store those binary files into `tempdir`.
 //!     // This may not be necessary for other languages.
-//!     let tempdir = TempDir::new("rust_lang_tester").unwrap();
+//!     let tempdir = TempDir::new().unwrap();
 //!     LangTester::new()
 //!         .test_dir("examples/rust_lang_tester/lang_tests")
 //!         // Only use files named `*.rs` as test files.
