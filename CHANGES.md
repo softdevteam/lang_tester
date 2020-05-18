@@ -1,3 +1,11 @@
+# lang_tester 0.3.9 (2020-05-18)
+
+* Add `test_threads` function which allows you to specify the number of test
+  threads programatically.
+
+* Move from the deprecated `tempdir` to the maintained `tempfile` crate.
+
+
 # lang_tester 0.3.8 (2019-12-24)
 
 * Fix bug on OS X where input from sub-processes blocked forever.
