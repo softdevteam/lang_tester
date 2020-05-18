@@ -1,0 +1,10 @@
+# The service providing the commit statuses to GitHub.
+status = [
+  "buildbot/buildbot-build-script"
+]
+
+# Allow twenty minutes for builds.
+timeout_sec = 1200
+
+# Have bors delete auto-merged branches
+delete_merged_branches = true
