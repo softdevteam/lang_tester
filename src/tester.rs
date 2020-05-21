@@ -2,13 +2,13 @@ use std::{
     collections::{hash_map::HashMap, HashSet},
     convert::TryFrom,
     env,
-    fs::read_to_string,
+    fs::{canonicalize, read_to_string},
     io::{self, Read, Write},
     os::{
         raw::c_int,
         unix::{io::AsRawFd, process::ExitStatusExt},
     },
-    path::{Path, PathBuf},
+    path::{Path, PathBuf, MAIN_SEPARATOR},
     process::{self, Command, ExitStatus},
     str,
     sync::{
@@ -38,8 +38,7 @@ const INITIAL_WAIT_TIMEOUT: u64 = 10000; // nanoseconds
 /// The maximum time we should wait() between checking if a child process has exited.
 const MAX_WAIT_TIMEOUT: u64 = 250_000_000; // nanoseconds
 
-pub struct LangTester<'a> {
-    test_dir: Option<&'a str>,
+pub struct LangTester {
     use_cmdline_args: bool,
     test_file_filter: Option<Box<dyn Fn(&Path) -> bool>>,
     cmdline_filters: Option<Vec<String>>,
@@ -49,6 +48,7 @@ pub struct LangTester<'a> {
 /// This is the information shared across test threads and which needs to be hidden behind an
 /// `Arc`.
 struct LangTesterPooler {
+    test_dir: Option<PathBuf>,
     test_threads: usize,
     ignored: bool,
     nocapture: bool,
@@ -56,17 +56,17 @@ struct LangTesterPooler {
     test_cmds: Option<Box<dyn Fn(&Path) -> Vec<(&str, Command)> + Send + Sync>>,
 }
 
-impl<'a> LangTester<'a> {
+impl LangTester {
     /// Create a new `LangTester` with default options. Note that, at a minimum, you need to call
     /// [`test_dir`](#method.test_dir), [`test_extract`](#method.test_extract), and
     /// [`test_cmds`](#method.test_cmds).
     pub fn new() -> Self {
         LangTester {
-            test_dir: None,
             test_file_filter: None,
             use_cmdline_args: true,
             cmdline_filters: None,
             inner: Arc::new(LangTesterPooler {
+                test_dir: None,
                 ignored: false,
                 nocapture: false,
                 test_threads: num_cpus::get(),
@@ -79,14 +79,15 @@ impl<'a> LangTester<'a> {
     /// Specify the directory where test files are contained. Note that this directory will be
     /// searched recursively (i.e. subdirectories and their contents will also be considered as
     /// potential test files).
-    pub fn test_dir(&'a mut self, test_dir: &'a str) -> &'a mut Self {
-        self.test_dir = Some(test_dir);
+    pub fn test_dir(&mut self, test_dir: &str) -> &mut Self {
+        let inner = Arc::get_mut(&mut self.inner).unwrap();
+        inner.test_dir = Some(canonicalize(test_dir).unwrap());
         self
     }
 
     /// Specify the number of simultaneous running test cases. Defaults to using
     /// all available CPUs.
-    pub fn test_threads(&'a mut self, test_threads: usize) -> &'a mut Self {
+    pub fn test_threads(&mut self, test_threads: usize) -> &mut Self {
         let inner = Arc::get_mut(&mut self.inner).unwrap();
         inner.test_threads = test_threads;
         self
@@ -102,7 +103,9 @@ impl<'a> LangTester<'a> {
     ///     .test_file_filter(|p| p.extension().unwrap().to_str().unwrap() == "rs")
     ///     ...
     /// ```
-    pub fn test_file_filter<F>(&'a mut self, test_file_filter: F) -> &'a mut Self
+    ///
+    /// Note that `lang_tester` recursively searches directories for files.
+    pub fn test_file_filter<F>(&mut self, test_file_filter: F) -> &mut Self
     where
         F: 'static + Fn(&Path) -> bool,
     {
@@ -134,7 +137,7 @@ impl<'a> LangTester<'a> {
     ///     })
     ///     ...
     /// ```
-    pub fn test_extract<F>(&'a mut self, test_extract: F) -> &'a mut Self
+    pub fn test_extract<F>(&mut self, test_extract: F) -> &mut Self
     where
         F: 'static + Fn(&str) -> Option<String> + Send + Sync,
     {
@@ -180,7 +183,7 @@ impl<'a> LangTester<'a> {
     ///     Error at line 10
     ///     ...
     /// ```
-    pub fn test_cmds<F>(&'a mut self, test_cmds: F) -> &'a mut Self
+    pub fn test_cmds<F>(&mut self, test_cmds: F) -> &mut Self
     where
         F: 'static + Fn(&Path) -> Vec<(&str, Command)> + Send + Sync,
     {
@@ -205,14 +208,14 @@ impl<'a> LangTester<'a> {
     /// ```
     ///
     /// This option defaults to `true`.
-    pub fn use_cmdline_args(&'a mut self, use_cmdline_args: bool) -> &'a mut Self {
+    pub fn use_cmdline_args(&mut self, use_cmdline_args: bool) -> &mut Self {
         self.use_cmdline_args = use_cmdline_args;
         self
     }
 
     /// Make sure the user has specified the minimum set of things we need from them.
     fn validate(&self) {
-        if self.test_dir.is_none() {
+        if self.inner.test_dir.is_none() {
             fatal("test_dir must be specified.");
         }
         if self.inner.test_extract.is_none() {
@@ -225,22 +228,24 @@ impl<'a> LangTester<'a> {
 
     /// Enumerate all the test files we need to check, along with the number of files filtered out
     /// (e.g. if you have tests `a, b, c` and the user does something like `cargo test b`, 2 tests
-    /// (`a` and `c`) will be filtered out.
+    /// (`a` and `c`) will be filtered out. The `PathBuf`s returned are guaranteed to be fully
+    /// canonicalised.
     fn test_files(&self) -> (Vec<PathBuf>, usize) {
         let mut num_filtered = 0;
-        let paths = WalkDir::new(self.test_dir.unwrap())
+        let paths = WalkDir::new(self.inner.test_dir.as_ref().unwrap())
             .into_iter()
             .filter_map(|x| x.ok())
             .filter(|x| x.file_type().is_file())
+            .map(|x| canonicalize(x.into_path()).unwrap())
             // Filter out non-test files
             .filter(|x| match self.test_file_filter.as_ref() {
-                Some(f) => f(x.path()),
+                Some(f) => f(x),
                 None => true,
             })
             // If the user has named one or more tests on the command-line, run only those,
             // filtering out the rest (counting them as ignored).
             .filter(|x| {
-                let x_path = x.path().to_str().unwrap();
+                let x_path = x.to_str().unwrap();
                 match self.cmdline_filters.as_ref() {
                     Some(fs) => {
                         debug_assert!(self.use_cmdline_args);
@@ -255,7 +260,6 @@ impl<'a> LangTester<'a> {
                     None => true,
                 }
             })
-            .map(|x| x.into_path())
             .collect();
         (paths, num_filtered)
     }
@@ -475,7 +479,7 @@ fn test_file(
     let num_ignored = Arc::new(AtomicUsize::new(0));
     let pool = ThreadPool::new(inner.test_threads);
     for p in test_files {
-        let test_fname = p.file_stem().unwrap().to_str().unwrap().to_owned();
+        let test_fname = test_fname(inner.test_dir.as_ref().unwrap(), &p);
 
         let num_ignored = num_ignored.clone();
         let failures = failures.clone();
@@ -503,7 +507,7 @@ fn test_file(
                 return;
             }
 
-            if run_tests(Arc::clone(&inner), tests.tests, p, failures) {
+            if run_tests(Arc::clone(&inner), tests.tests, p, test_fname, failures) {
                 num_ignored.fetch_add(1, Ordering::Relaxed);
             }
         });
@@ -514,15 +518,30 @@ fn test_file(
     (failures, Arc::try_unwrap(num_ignored).unwrap().into_inner())
 }
 
+/// Convert a test file name to a user-friendly test name (e.g. "lang_tests/a/b.x" might become
+/// "a::b.x").
+fn test_fname(test_dir_path: &Path, test_fpath: &Path) -> String {
+    if let Some(test_fpath) = test_fpath.as_os_str().to_str() {
+        if let Some(testdir_path) = test_dir_path.as_os_str().to_str() {
+            if test_fpath.starts_with(testdir_path) {
+                return test_fpath[testdir_path.len() + MAIN_SEPARATOR.len_utf8()..]
+                    .to_owned()
+                    .replace(MAIN_SEPARATOR, "::");
+            }
+        }
+    }
+
+    test_fpath.file_stem().unwrap().to_str().unwrap().to_owned()
+}
+
 /// Run the tests for `path`.
 fn run_tests<'a>(
     inner: Arc<LangTesterPooler>,
     tests: HashMap<String, TestCmd<'a>>,
     path: PathBuf,
+    test_fname: String,
     failures: Arc<Mutex<Vec<(String, TestFailure)>>>,
 ) -> bool {
-    let test_fname = path.file_stem().unwrap().to_str().unwrap().to_owned();
-
     if !cfg!(unix) && tests.values().any(|t| t.status == Status::Signal) {
         write_ignored(
             test_fname.as_str(),
