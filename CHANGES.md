@@ -1,3 +1,12 @@
+# lang_tester 0.3.10 (2020-06-04)
+
+* Print out the name of tests inside nested directories rather than flattening
+  them all such that they appear to be the top-level directory. If you have
+  tests `a/x` and `b/x` these are pretty printed as `a::x` and `b::x`
+  respectively (whereas before they were pretty printed as simply `x`, meaning
+  that you could not tell which had succeeded / failed).
+
+
 # lang_tester 0.3.9 (2020-05-18)
 
 * Add `test_threads` function which allows you to specify the number of test
