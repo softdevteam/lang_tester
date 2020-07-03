@@ -163,7 +163,6 @@
 #![allow(clippy::redundant_closure)]
 #![allow(clippy::type_complexity)]
 
-mod fuzzy;
 mod parser;
 mod tester;
 
