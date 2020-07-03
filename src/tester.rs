@@ -19,13 +19,14 @@ use std::{
     time::{Duration, Instant},
 };
 
+use fm::FMatcher;
 use getopts::Options;
 use libc::{fcntl, poll, pollfd, F_GETFL, F_SETFL, O_NONBLOCK, POLLERR, POLLHUP, POLLIN};
 use termcolor::{Color, ColorChoice, ColorSpec, StandardStream, WriteColor};
 use threadpool::ThreadPool;
 use walkdir::WalkDir;
 
-use crate::{fatal, fuzzy, parser::parse_tests};
+use crate::{fatal, parser::parse_tests};
 
 /// The size of the (stack allocated) buffer use to read stderr/stdout from a child process.
 const READBUF: usize = 1024 * 4; // bytes
@@ -580,8 +581,14 @@ fn run_tests<'a>(
             Status::Signal => status.signal().is_some(),
             Status::Int(i) => status.code() == Some(i),
         };
-        let pass_stderr = fuzzy::match_vec(&test.stderr, &stderr);
-        let pass_stdout = fuzzy::match_vec(&test.stdout, &stdout);
+        let pass_stderr = FMatcher::new(&test.stderr.join("\n"))
+            .unwrap()
+            .matches(&stderr)
+            .is_ok();
+        let pass_stdout = FMatcher::new(&test.stdout.join("\n"))
+            .unwrap()
+            .matches(&stdout)
+            .is_ok();
 
         // Second, if a test failed, we want to print out everything which didn't match
         // successfully (i.e. if the stderr test failed, print that out; but, equally, if
