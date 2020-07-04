@@ -12,6 +12,7 @@ export PATH=`pwd`/.cargo/bin/:$PATH
 
 cargo fmt --all -- --check
 cargo test
+cargo run --example fm_options
 cargo run --example rust_lang_tester
 
 which cargo-deny | cargo install cargo-deny

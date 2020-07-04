@@ -19,7 +19,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use fm::FMatcher;
+use fm::FMBuilder;
 use getopts::Options;
 use libc::{fcntl, poll, pollfd, F_GETFL, F_SETFL, O_NONBLOCK, POLLERR, POLLHUP, POLLIN};
 use termcolor::{Color, ColorChoice, ColorSpec, StandardStream, WriteColor};
@@ -54,7 +54,17 @@ struct LangTesterPooler {
     ignored: bool,
     nocapture: bool,
     test_extract: Option<Box<dyn Fn(&str) -> Option<String> + Send + Sync>>,
+    fm_options: Option<
+        Box<dyn for<'a> Fn(&'a Path, TestStream, FMBuilder<'a>) -> FMBuilder<'a> + Send + Sync>,
+    >,
     test_cmds: Option<Box<dyn Fn(&Path) -> Vec<(&str, Command)> + Send + Sync>>,
+}
+
+/// Specify a given test stream.
+#[derive(Clone, Copy)]
+pub enum TestStream {
+    Stderr,
+    Stdout,
 }
 
 impl LangTester {
@@ -71,6 +81,7 @@ impl LangTester {
                 ignored: false,
                 nocapture: false,
                 test_threads: num_cpus::get(),
+                fm_options: None,
                 test_extract: None,
                 test_cmds: None,
             }),
@@ -143,6 +154,32 @@ impl LangTester {
         F: 'static + Fn(&str) -> Option<String> + Send + Sync,
     {
         Arc::get_mut(&mut self.inner).unwrap().test_extract = Some(Box::new(test_extract));
+        self
+    }
+
+    /// Specify a function which sets options for the [`fm`](https://crates.io/crates/fm) library.
+    /// `fm` is used for the fuzzy matching in `lang_tester`. This function can be used to override
+    /// `fm`'s defaults for a given test file (passed as `Path`) and a given testing stream (stderr
+    /// or stdout, passed as `TestStream`) when executing a command for that file: it is passed a
+    /// [`FMBuilder`](https://docs.rs/fm/*/fm/struct.FMBuilder.html) and must return a `FMBuilder`.
+    /// For example, to make use of `fm`'s "name matcher" option such that all instances of `$1`
+    /// must match the same value (without precisely specifying what that value is) one could use
+    /// the following:
+    ///
+    /// ```rust,ignore
+    /// LangTester::new()
+    ///    ...
+    ///    .fm_options(|_, _, fmb| {
+    ///        let ptn_re = Regex::new(r"\$.+?\b").unwrap();
+    ///        let text_re = Regex::new(r".+?\b").unwrap();
+    ///        fmb.name_matcher(Some((ptn_re, text_re)))
+    ///    })
+    /// ```
+    pub fn fm_options<F>(&mut self, fm_options: F) -> &mut Self
+    where
+        F: 'static + for<'a> Fn(&'a Path, TestStream, FMBuilder<'a>) -> FMBuilder<'a> + Send + Sync,
+    {
+        Arc::get_mut(&mut self.inner).unwrap().fm_options = Some(Box::new(fm_options));
         self
     }
 
@@ -571,6 +608,18 @@ fn run_tests<'a>(
 
         let mut meant_to_error = false;
 
+        // Give the user the option of setting options for the fuzzy matchers.
+        let stderr_str = test.stderr.join("\n");
+        let mut stderr_fmb = FMBuilder::new(&stderr_str).unwrap();
+        let stdout_str = test.stdout.join("\n");
+        let mut stdout_fmb = FMBuilder::new(&stdout_str).unwrap();
+        if let Some(ref fm_options) = inner.fm_options {
+            stderr_fmb = fm_options(path.as_path(), TestStream::Stderr, stderr_fmb);
+            stdout_fmb = fm_options(path.as_path(), TestStream::Stdout, stdout_fmb);
+        }
+        let pass_stderr = stderr_fmb.build().unwrap().matches(&stderr).is_ok();
+        let pass_stdout = stdout_fmb.build().unwrap().matches(&stdout).is_ok();
+
         // First, check whether the tests passed.
         let pass_status = match test.status {
             Status::Success => status.success(),
@@ -581,14 +630,6 @@ fn run_tests<'a>(
             Status::Signal => status.signal().is_some(),
             Status::Int(i) => status.code() == Some(i),
         };
-        let pass_stderr = FMatcher::new(&test.stderr.join("\n"))
-            .unwrap()
-            .matches(&stderr)
-            .is_ok();
-        let pass_stdout = FMatcher::new(&test.stdout.join("\n"))
-            .unwrap()
-            .matches(&stdout)
-            .is_ok();
 
         // Second, if a test failed, we want to print out everything which didn't match
         // successfully (i.e. if the stderr test failed, print that out; but, equally, if
