@@ -21,7 +21,9 @@ use std::{
 
 use fm::FMBuilder;
 use getopts::Options;
-use libc::{fcntl, poll, pollfd, F_GETFL, F_SETFL, O_NONBLOCK, POLLERR, POLLHUP, POLLIN};
+use libc::{
+    close, fcntl, poll, pollfd, F_GETFL, F_SETFL, O_NONBLOCK, POLLERR, POLLHUP, POLLIN, POLLOUT,
+};
 use termcolor::{Color, ColorChoice, ColorSpec, StandardStream, WriteColor};
 use threadpool::ThreadPool;
 use walkdir::WalkDir;
@@ -369,6 +371,12 @@ impl LangTester {
                 if let Some(ref status) = test.status {
                     eprintln!("\n---- lang_tests::{} status ----\n{}", test_fname, status);
                 }
+                if test.stdin_remaining != 0 {
+                    eprintln!(
+                        "\n---- lang_tests::{} stdin ----\n{} bytes of stdin were not consumed",
+                        test_fname, test.stdin_remaining
+                    );
+                }
                 if let Some(ref stderr) = test.stderr {
                     eprintln!(
                         "\n---- lang_tests::{} stderr ----\n{}\n",
@@ -425,6 +433,7 @@ pub(crate) enum Status {
 #[derive(Clone, Debug)]
 pub(crate) struct TestCmd<'a> {
     pub status: Status,
+    pub stdin: Option<String>,
     pub stderr: Vec<&'a str>,
     pub stdout: Vec<&'a str>,
     /// A list of custom command line arguments which should be passed when
@@ -436,6 +445,7 @@ impl<'a> TestCmd<'a> {
     pub fn default() -> Self {
         Self {
             status: Status::Success,
+            stdin: None,
             stderr: vec!["..."],
             stdout: vec!["..."],
             args: Vec::new(),
@@ -454,6 +464,7 @@ pub(crate) struct Tests<'a> {
 #[derive(Debug, PartialEq)]
 struct TestFailure {
     status: Option<String>,
+    stdin_remaining: usize,
     stderr: Option<String>,
     stdout: Option<String>,
 }
@@ -597,6 +608,7 @@ fn run_tests<'a>(
 
     let mut failure = TestFailure {
         status: None,
+        stdin_remaining: 0,
         stderr: None,
         stdout: None,
     };
@@ -604,7 +616,8 @@ fn run_tests<'a>(
         let default_test = TestCmd::default();
         let test = tests.get(&cmd_name).unwrap_or(&default_test);
         cmd.args(&test.args);
-        let (status, stderr, stdout) = run_cmd(inner.clone(), &test_fname, cmd);
+        let (status, stdin_remaining, stderr, stdout) =
+            run_cmd(inner.clone(), &test_fname, cmd, &test);
 
         let mut meant_to_error = false;
 
@@ -635,7 +648,7 @@ fn run_tests<'a>(
         // successfully (i.e. if the stderr test failed, print that out; but, equally, if
         // stderr wasn't specified as a test, print it out, because the user can't
         // otherwise know what it contains).
-        if !(pass_status && pass_stderr && pass_stdout) {
+        if !(pass_status && stdin_remaining == 0 && pass_stderr && pass_stdout) {
             if !pass_status || failure.status.is_none() {
                 match test.status {
                     Status::Success | Status::Error => {
@@ -670,6 +683,8 @@ fn run_tests<'a>(
                 failure.stdout = Some(stdout);
             }
 
+            failure.stdin_remaining = stdin_remaining;
+
             // If a sub-test failed, bail out immediately, otherwise subsequent sub-tests
             // will overwrite the failure output!
             break;
@@ -694,6 +709,7 @@ fn run_tests<'a>(
         if failure
             != (TestFailure {
                 status: None,
+                stdin_remaining: 0,
                 stderr: None,
                 stdout: None,
             })
@@ -721,34 +737,43 @@ fn run_cmd(
     inner: Arc<LangTesterPooler>,
     test_fname: &str,
     mut cmd: Command,
-) -> (ExitStatus, String, String) {
+    test: &TestCmd,
+) -> (ExitStatus, usize, String, String) {
     // The basic sequence here is:
     //   1) Spawn the command
     //   2) Read everything from stderr & stdout until they are both disconnected
     //   3) wait() for the command to finish
 
     let mut child = cmd
+        .stdin(process::Stdio::piped())
         .stderr(process::Stdio::piped())
         .stdout(process::Stdio::piped())
-        .stdin(process::Stdio::null())
         .spawn()
         .unwrap_or_else(|_| fatal(&format!("Couldn't run command {:?}.", cmd)));
 
+    let stdin = child.stdin.as_mut().unwrap();
     let stderr = child.stderr.as_mut().unwrap();
     let stdout = child.stdout.as_mut().unwrap();
 
+    let stdin_fd = stdin.as_raw_fd();
     let stderr_fd = stderr.as_raw_fd();
     let stdout_fd = stdout.as_raw_fd();
-    if set_nonblock(stderr_fd)
+    if set_nonblock(stdin_fd)
+        .and_then(|_| set_nonblock(stderr_fd))
         .and_then(|_| set_nonblock(stdout_fd))
         .is_err()
     {
-        fatal("Couldn't set stderr and/or stdout to be non-blocking");
+        fatal("Couldn't set stdin and/or stderr and/or stdout to be non-blocking");
     }
 
     let mut cap_stderr = String::new();
     let mut cap_stdout = String::new();
     let mut pollfds = [
+        pollfd {
+            fd: stdin_fd,
+            events: 0,
+            revents: 0,
+        },
         pollfd {
             fd: stderr_fd,
             events: POLLERR | POLLIN | POLLHUP,
@@ -760,6 +785,14 @@ fn run_cmd(
             revents: 0,
         },
     ];
+    let mut stdin_off = 0;
+    let mut stdin_finished;
+    if test.stdin.is_none() {
+        stdin_finished = true;
+    } else {
+        stdin_finished = false;
+        pollfds[0].events = POLLERR | POLLOUT | POLLHUP;
+    }
     let mut buf = [0; READBUF];
     let start = Instant::now();
     let mut last_warning = Instant::now();
@@ -774,8 +807,28 @@ fn run_cmd(
                 .unwrap_or(1000),
         )
         .unwrap_or(1000);
-        if unsafe { poll((&mut pollfds) as *mut _ as *mut pollfd, 2, timeout) } != -1 {
-            if pollfds[0].revents & POLLIN == POLLIN {
+        if unsafe { poll((&mut pollfds) as *mut _ as *mut pollfd, 3, timeout) } != -1 {
+            if pollfds[0].revents & POLLOUT == POLLOUT {
+                // This unwrap() is safe as long as POLLOUT is removed from stdin's events when
+                // stdin is closed.
+                let stdin_str = test.stdin.as_ref().unwrap();
+                if let Ok(i) = stdin.write(&stdin_str.as_bytes()[stdin_off..]) {
+                    stdin_off += i;
+                }
+                if stdin_off == stdin_str.len() {
+                    stdin_finished = true;
+                    // This is a bit icky, because the `stdin` variable will later close stdin when the
+                    // variable is dropped. However, some programs expect stdin to be closed before
+                    // they'll continue, so this is the least worst option.
+                    unsafe {
+                        close(stdin_fd);
+                    }
+                    // Remove POLLOUT from events so that we don't try reading anything again.
+                    pollfds[0].events = POLLERR | POLLHUP;
+                }
+            }
+
+            if pollfds[1].revents & POLLIN == POLLIN {
                 if let Ok(i) = stderr.read(&mut buf) {
                     if i > 0 {
                         let utf8 = str::from_utf8(&buf[..i]).unwrap_or_else(|_| {
@@ -789,7 +842,7 @@ fn run_cmd(
                 }
             }
 
-            if pollfds[1].revents & POLLIN == POLLIN {
+            if pollfds[2].revents & POLLIN == POLLIN {
                 if let Ok(i) = stdout.read(&mut buf) {
                     if i > 0 {
                         let utf8 = str::from_utf8(&buf[..i]).unwrap_or_else(|_| {
@@ -803,7 +856,10 @@ fn run_cmd(
                 }
             }
 
-            if pollfds[0].revents & POLLHUP == POLLHUP && pollfds[1].revents & POLLHUP == POLLHUP {
+            if (stdin_finished || pollfds[0].revents & POLLHUP == POLLHUP)
+                && pollfds[1].revents & POLLHUP == POLLHUP
+                && pollfds[2].revents & POLLHUP == POLLHUP
+            {
                 break;
             }
         }
@@ -861,7 +917,14 @@ fn run_cmd(
             }
         }
     };
-    (status, cap_stderr, cap_stdout)
+
+    let stdin_remaining = if stdin_finished {
+        0
+    } else {
+        let stdin_str = test.stdin.as_ref().unwrap();
+        stdin_str.len() - stdin_off
+    };
+    (status, stdin_remaining, cap_stderr, cap_stdout)
 }
 
 fn set_nonblock(fd: c_int) -> Result<(), io::Error> {
