@@ -108,6 +108,10 @@ following:
   * `extra-args: <arg 1> [... <arg n>]`, where each space separated argument
     will be appended, in order, to those arguments specified as part of
     the `test_cmds` function.
+ * `stdin: <string>`, text to be passed to the command's `stdin`. If the command exits without
+   having consumed all of `<string>`, an error will be raised. Note, though, that operating
+   system file buffers can mean that the command *appears* to have consumed all of `<string>`
+   without it actually having done so.
 
 The above file thus contains 4 meaningful tests, two specified by the user and
 two implied by defaults: the `Compiler` should succeed (e.g.  return a `0` exit

@@ -72,6 +72,9 @@ pub(crate) fn parse_tests(test_str: &str) -> Tests {
                             };
                             testcmd.status = status;
                         }
+                        "stdin" => {
+                            testcmd.stdin = Some(val.join("\n"));
+                        }
                         "stderr" => {
                             testcmd.stderr = val;
                         }
