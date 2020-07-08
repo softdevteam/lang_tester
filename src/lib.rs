@@ -78,8 +78,20 @@
 //!
 //! Test data is specified with a two-level indentation syntax: the outer most level of indentation
 //! defines a test command (multiple command names can be specified, as in the above); the inner
-//! most level of indentation defines alterations to the general command or sub-tests. Each test
-//! command must define at least one sub-test:
+//! most level of indentation defines alterations to the general command or sub-tests. Multi-line
+//! values are stripped of their common indentation, such that:
+//!
+//! ```text
+//! x:
+//!   a
+//!     b
+//!   c
+//! ```
+//!
+//! defines a key `x` with a value `a\n  b\nc`. Trailing whitespace is not stripped from each line.
+//! Note that by default `fm` ignores leading and trailing whitespace.
+//!
+//! Each test command must define at least one sub-test:
 //!
 //!   * `status: <success|failure|signal|<int>>`, where `success` and `failure` map to platform
 //!     specific notions of a command completing successfully or unsuccessfully respectively.

@@ -122,11 +122,11 @@ fn key_val<'a>(lines: &[&'a str], line_off: usize, indent: usize) -> (&'a str, &
         .chars()
         .take_while(|c| c.is_whitespace())
         .count();
-    (key, &line[content_start..].trim())
+    (key, &line[content_start..])
 }
 
 /// Turn one more lines of the format `key: val` (where `val` may spread over many lines) into its
-/// separate components. Guarantees to trim leading and trailing newlines.
+/// separate components.
 fn key_multiline_val<'a>(
     lines: &[&'a str],
     mut line_off: usize,
@@ -147,7 +147,7 @@ fn key_multiline_val<'a>(
             if cur_indent <= indent {
                 break;
             }
-            val.push(&lines[line_off][sub_indent..].trim());
+            val.push(&lines[line_off][sub_indent..]);
             line_off += 1;
         }
     }
@@ -180,7 +180,11 @@ mod test {
         );
         assert_eq!(
             key_multiline_val(&["x:", "  z  ", "  a  ", "  ", "b"], 0, 0),
-            (4, "x", vec!["z", "a"])
+            (4, "x", vec!["z  ", "a  "])
+        );
+        assert_eq!(
+            key_multiline_val(&["x:", "  z  ", "    a  ", "  ", "  b"], 0, 0),
+            (5, "x", vec!["z  ", "  a  ", "", "b"])
         );
     }
 }
