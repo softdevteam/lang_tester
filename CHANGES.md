@@ -1,3 +1,19 @@
+# lang_tester 0.3.11 (2020-07-09)
+
+* Remove the built-in fuzzy matcher and use the [`fm`
+  library](https://crates.io/crates/fm) instead. This should be entirely
+  backwards compatible in its default state. Users who want non-default `fm`
+  options can use the new `fm_options` function in `LangTester`.
+
+* Add a `stdin` key to allow users to specify stdin input which should be
+  passed to a sub-command.
+
+* Lines are no longer stripped of their leading or trailing whitespace allowing
+  tests to be whitespace sensitive if required. Since matching in `fm` defaults
+  to ignoring leading and trailing whitespace, the previous behaviour is
+  preserved unless users explicitly tell `fm` to match whitespace.
+
+
 # lang_tester 0.3.10 (2020-06-04)
 
 * Print out the name of tests inside nested directories rather than flattening
