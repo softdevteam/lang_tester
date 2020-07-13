@@ -1,3 +1,10 @@
+# lang_tester 0.3.12 (2020-07-13)
+
+* Failed stderr/stdout tests now use fm to show the offending line and up to 3
+  lines of surrounding context. This makes it much easier to understand why a
+  stderr/test failed.
+
+
 # lang_tester 0.3.11 (2020-07-09)
 
 * Remove the built-in fuzzy matcher and use the [`fm`
