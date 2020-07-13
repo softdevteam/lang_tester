@@ -19,7 +19,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use fm::FMBuilder;
+use fm::{FMBuilder, FMatchError};
 use getopts::Options;
 use libc::{
     close, fcntl, poll, pollfd, F_GETFL, F_SETFL, O_NONBLOCK, POLLERR, POLLHUP, POLLIN, POLLOUT,
@@ -378,16 +378,20 @@ impl LangTester {
                     );
                 }
                 if let Some(ref stderr) = test.stderr {
-                    eprintln!(
-                        "\n---- lang_tests::{} stderr ----\n{}\n",
-                        test_fname, stderr
-                    );
+                    eprintln!("\n---- lang_tests::{} stderr ----\n", test_fname);
+                    if let Some(ref stderr_match) = test.stderr_match {
+                        eprint!("{}", stderr_match);
+                    } else {
+                        eprintln!("{}", stderr);
+                    }
                 }
                 if let Some(ref stdout) = test.stdout {
-                    eprintln!(
-                        "\n---- lang_tests::{} stdout ----\n{}\n",
-                        test_fname, stdout
-                    );
+                    eprintln!("\n---- lang_tests::{} stdout ----\n", test_fname);
+                    if let Some(ref stdout_match) = test.stdout_match {
+                        eprint!("{}", stdout_match);
+                    } else {
+                        eprintln!("{}", stdout);
+                    }
                 }
             }
             eprintln!("\nfailures:");
@@ -466,7 +470,9 @@ struct TestFailure {
     status: Option<String>,
     stdin_remaining: usize,
     stderr: Option<String>,
+    stderr_match: Option<FMatchError>,
     stdout: Option<String>,
+    stdout_match: Option<FMatchError>,
 }
 
 fn write_with_colour(s: &str, colour: Color) {
@@ -610,7 +616,9 @@ fn run_tests<'a>(
         status: None,
         stdin_remaining: 0,
         stderr: None,
+        stderr_match: None,
         stdout: None,
+        stdout_match: None,
     };
     for (cmd_name, mut cmd) in cmd_pairs {
         let default_test = TestCmd::default();
@@ -630,8 +638,8 @@ fn run_tests<'a>(
             stderr_fmb = fm_options(path.as_path(), TestStream::Stderr, stderr_fmb);
             stdout_fmb = fm_options(path.as_path(), TestStream::Stdout, stdout_fmb);
         }
-        let pass_stderr = stderr_fmb.build().unwrap().matches(&stderr).is_ok();
-        let pass_stdout = stdout_fmb.build().unwrap().matches(&stdout).is_ok();
+        let match_stderr = stderr_fmb.build().unwrap().matches(&stderr);
+        let match_stdout = stdout_fmb.build().unwrap().matches(&stdout);
 
         // First, check whether the tests passed.
         let pass_status = match test.status {
@@ -648,7 +656,7 @@ fn run_tests<'a>(
         // successfully (i.e. if the stderr test failed, print that out; but, equally, if
         // stderr wasn't specified as a test, print it out, because the user can't
         // otherwise know what it contains).
-        if !(pass_status && stdin_remaining == 0 && pass_stderr && pass_stdout) {
+        if !(pass_status && stdin_remaining == 0 && match_stderr.is_ok() && match_stdout.is_ok()) {
             if !pass_status || failure.status.is_none() {
                 match test.status {
                     Status::Success | Status::Error => {
@@ -675,12 +683,18 @@ fn run_tests<'a>(
                 }
             }
 
-            if !pass_stderr || failure.stderr.is_none() {
+            if match_stderr.is_err() || failure.stderr.is_none() {
                 failure.stderr = Some(stderr);
             }
+            if let Err(e) = match_stderr {
+                failure.stderr_match = Some(e);
+            }
 
-            if !pass_stdout || failure.stdout.is_none() {
+            if match_stdout.is_err() || failure.stdout.is_none() {
                 failure.stdout = Some(stdout);
+            }
+            if let Err(e) = match_stdout {
+                failure.stdout_match = Some(e);
             }
 
             failure.stdin_remaining = stdin_remaining;
@@ -711,7 +725,9 @@ fn run_tests<'a>(
                 status: None,
                 stdin_remaining: 0,
                 stderr: None,
+                stderr_match: None,
                 stdout: None,
+                stdout_match: None,
             })
         {
             let mut failures = failures.lock().unwrap();
