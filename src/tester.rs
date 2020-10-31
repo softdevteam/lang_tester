@@ -512,7 +512,7 @@ fn usage() -> ! {
 /// ever fire.
 fn check_names<'a>(cmd_pairs: &[(String, Command)], tests: &HashMap<String, TestCmd<'a>>) {
     let cmd_names = cmd_pairs.iter().map(|x| &x.0).collect::<HashSet<_>>();
-    let test_names = tests.keys().map(|x| x).collect::<HashSet<_>>();
+    let test_names = tests.keys().collect::<HashSet<_>>();
     let diff = test_names
         .difference(&cmd_names)
         .map(|x| x.as_str())
@@ -590,9 +590,9 @@ fn test_fname(test_dir_path: &Path, test_fpath: &Path) -> String {
 }
 
 /// Run the tests for `path`.
-fn run_tests<'a>(
+fn run_tests(
     inner: Arc<LangTesterPooler>,
-    tests: HashMap<String, TestCmd<'a>>,
+    tests: HashMap<String, TestCmd>,
     path: PathBuf,
     test_fname: String,
     failures: Arc<Mutex<Vec<(String, TestFailure)>>>,
