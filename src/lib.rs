@@ -88,8 +88,18 @@
 //!   c
 //! ```
 //!
-//! defines a key `x` with a value `a\n  b\nc`. Trailing whitespace is not stripped from each line.
-//! Note that by default `fm` ignores leading and trailing whitespace.
+//! defines a test command `x` with a value `a\n  b\nc`. Trailing whitespace is preserved.
+//!
+//! String matching is performed by the [fm crate](https://crates.io/crates/fm), which provides
+//! support for `...` operators and so on. Unless `lang_tester` is explicitly instructed otherwise,
+//! it uses `fm`'s defaults. In particular, even though `lang_tester` preserves (some) leading and
+//! (all) trailing whitespace, `fm` ignores leading and trailing whitespace by default (though this
+//! can be changed).
+//!
+//! String matching is performed by the [fm crate](https://crates.io/crates/fm), which provides
+//! support for `...` operators and so on. Unless `lang_tester` is explicitly instructed otherwise,
+//! it uses `fm`'s defaults. Thus, for example, while `lang_tester` preserves trailing whitespace,
+//! `fm`'s default is to ignore trailing whitespace.
 //!
 //! Each test command must define at least one sub-test:
 //!
