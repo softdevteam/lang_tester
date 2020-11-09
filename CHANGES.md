@@ -1,3 +1,8 @@
+# lang_tester 0.3.13 (2020-11-09)
+
+* Silence some Clippy warnings and fix documentation inconsistencies.
+
+
 # lang_tester 0.3.12 (2020-07-13)
 
 * Failed stderr/stdout tests now use fm to show the offending line and up to 3
