@@ -25,7 +25,7 @@ fn main() {
         .fm_options(|_, _, fmb| {
             let ptn_re = Regex::new(r"\$.+?\b").unwrap();
             let text_re = Regex::new(r".+?\b").unwrap();
-            fmb.name_matcher(Some((ptn_re, text_re)))
+            fmb.name_matcher(ptn_re, text_re)
                 .ignore_leading_whitespace(false)
         })
         .test_cmds(move |p| {

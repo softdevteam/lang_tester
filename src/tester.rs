@@ -174,7 +174,7 @@ impl LangTester {
     ///    .fm_options(|_, _, fmb| {
     ///        let ptn_re = Regex::new(r"\$.+?\b").unwrap();
     ///        let text_re = Regex::new(r".+?\b").unwrap();
-    ///        fmb.name_matcher(Some((ptn_re, text_re)))
+    ///        fmb.name_matcher(ptn_re, text_re)
     ///    })
     /// ```
     pub fn fm_options<F>(&mut self, fm_options: F) -> &mut Self
