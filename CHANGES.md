@@ -1,3 +1,11 @@
+# lang_tester 0.4.0 (2020-11-26)
+
+* Update to fm 0.2.0. This changes the interface exposed by the `fm_options`
+  function. See the [`fm`
+  changes](https://github.com/softdevteam/fm/blob/master/CHANGES.md) for more
+  information.
+
+
 # lang_tester 0.3.13 (2020-11-09)
 
 * Silence some Clippy warnings and fix documentation inconsistencies.
