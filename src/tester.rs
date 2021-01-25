@@ -2,7 +2,7 @@ use std::{
     collections::{hash_map::HashMap, HashSet},
     convert::TryFrom,
     env,
-    fs::{canonicalize, read_to_string},
+    fs::canonicalize,
     io::{self, Read, Write},
     os::{
         raw::c_int,
@@ -55,7 +55,7 @@ struct LangTesterPooler {
     test_threads: usize,
     ignored: bool,
     nocapture: bool,
-    test_extract: Option<Box<dyn Fn(&str) -> Option<String> + Send + Sync>>,
+    test_extract: Option<Box<dyn Fn(&Path) -> String + Send + Sync>>,
     fm_options: Option<
         Box<dyn for<'a> Fn(&'a Path, TestStream, FMBuilder<'a>) -> FMBuilder<'a> + Send + Sync>,
     >,
@@ -127,8 +127,9 @@ impl LangTester {
         self
     }
 
-    /// Specify a function which can extract the test data for `lang_tester` from a test file. This
-    /// function is passed a `&str` and must return a `String`.
+    /// Specify a function which can extract the test data for `lang_tester` from a test file path,
+    /// returning it as a `String`. Note that the test data does not have to be extracted from the
+    /// `Path` passed to the function -- it can come from any source.
     ///
     /// How the test data is extracted from the test file is entirely up to the user, though a
     /// common convention is to store the test data in a comment at the beginning of the test file.
@@ -137,23 +138,23 @@ impl LangTester {
     /// ```rust,ignore
     /// LangTester::new()
     ///     ...
-    ///     .test_extract(|s| {
-    ///         Some(
-    ///             s.lines()
-    ///                 // Skip non-commented lines at the start of the file.
-    ///                 .skip_while(|l| !l.starts_with("//"))
-    ///                 // Extract consecutive commented lines.
-    ///                 .take_while(|l| l.starts_with("//"))
-    ///                 .map(|l| &l[2..])
-    ///                 .collect::<Vec<_>>()
-    ///                 .join("\n"),
-    ///         )
+    ///     .test_extract(|p| {
+    ///         std::fs::read_to_string(p)
+    ///             .unwrap()
+    ///             .lines()
+    ///             // Skip non-commented lines at the start of the file.
+    ///             .skip_while(|l| !l.starts_with("//"))
+    ///             // Extract consecutive commented lines.
+    ///             .take_while(|l| l.starts_with("//"))
+    ///             .map(|l| &l[2..])
+    ///             .collect::<Vec<_>>()
+    ///             .join("\n")
     ///     })
     ///     ...
     /// ```
     pub fn test_extract<F>(&mut self, test_extract: F) -> &mut Self
     where
-        F: 'static + Fn(&str) -> Option<String> + Send + Sync,
+        F: 'static + Fn(&Path) -> String + Send + Sync,
     {
         Arc::get_mut(&mut self.inner).unwrap().test_extract = Some(Box::new(test_extract));
         self
@@ -543,11 +544,7 @@ fn test_file(
             if inner.test_threads == 1 {
                 eprint!("\ntest lang_test::{} ... ", test_fname);
             }
-            let all_str = read_to_string(p.as_path())
-                .unwrap_or_else(|_| fatal(&format!("Couldn't read {}", test_fname)));
-            let test_str = inner.test_extract.as_ref().unwrap()(&all_str).unwrap_or_else(|| {
-                fatal(&format!("Couldn't extract test string from {}", test_fname))
-            });
+            let test_str = inner.test_extract.as_ref().unwrap()(p.as_path());
 
             if test_str.is_empty() {
                 write_ignored(test_fname.as_str(), "test string is empty", inner);

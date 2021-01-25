@@ -1,3 +1,31 @@
+# lang_tester 0.5.0 (xxxx-xx-xx)
+
+* The `test_extract` function signature has changed from:
+  ```
+  Fn(&str) -> Option<String> + Send + Sync,
+  ```
+  to:
+  ```
+  Fn(&Path) -> String + Send + Sync,
+  ```
+
+  In other words, users now have to both:
+
+    1. Read the contents of a path themselves (but it doesn't necessarily have
+       to be the path passed to the function!)
+    2. Return a `String` rather than an `Option<String>`.
+
+  In practise, most `test_extract` functions can be changed from (roughly):
+  ```
+  test_extract(|s| { s.lines() ... })
+  ```
+  to:
+  ```
+  test_extract(|p| { read_to_string(p).lines() })
+  ```
+
+
+
 # lang_tester 0.4.0 (2020-11-26)
 
 * Update to fm 0.2.0. This changes the interface exposed by the `fm_options`
