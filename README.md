@@ -12,7 +12,7 @@ For example, a Rust language tester, loosely in the spirit of
 [`compiletest_rs`](https://crates.io/crates/compiletest_rs), looks as follows:
 
 ```rust
-use std::{path::PathBuf, process::Command};
+use std::{fs::read_to_string, path::PathBuf, process::Command};
 
 use lang_tester::LangTester;
 use tempfile::TempDir;
@@ -26,17 +26,17 @@ fn main() {
         // Only use files named `*.rs` as test files.
         .test_file_filter(|p| p.extension().unwrap().to_str().unwrap() == "rs")
         // Extract the first sequence of commented line(s) as the tests.
-        .test_extract(|s| {
-            Some(
-                s.lines()
+        .test_extract(|p| {
+            read_to_string(p)
+                .unwrap()
+                .lines()
                     // Skip non-commented lines at the start of the file.
                     .skip_while(|l| !l.starts_with("//"))
                     // Extract consecutive commented lines.
                     .take_while(|l| l.starts_with("//"))
                     .map(|l| &l[2..])
                     .collect::<Vec<_>>()
-                    .join("\n"),
-            )
+                    .join("\n")
         })
         // We have two test commands:
         //   * `Compiler`: runs rustc.
