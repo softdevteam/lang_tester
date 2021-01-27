@@ -1,4 +1,4 @@
-# lang_tester 0.5.0 (xxxx-xx-xx)
+# lang_tester 0.5.0 (2021-01-27)
 
 * The `test_extract` function signature has changed from:
   ```
