@@ -11,9 +11,9 @@
 
   In other words, users now have to both:
 
-    1. Read the contents of a path themselves (but it doesn't necessarily have
-       to be the path passed to the function!)
-    2. Return a `String` rather than an `Option<String>`.
+    1. read the contents of a path themselves (but it doesn't necessarily have
+       to be the path passed to the function!),
+    2. and return a `String` rather than an `Option<String>`.
 
   In practise, most `test_extract` functions can be changed from (roughly):
   ```
@@ -21,9 +21,8 @@
   ```
   to:
   ```
-  test_extract(|p| { read_to_string(p).lines() })
+  test_extract(|p| { std::fs::read_to_string(p).lines() })
   ```
-
 
 
 # lang_tester 0.4.0 (2020-11-26)
