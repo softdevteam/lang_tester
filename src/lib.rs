@@ -1,8 +1,9 @@
 //! This crate provides a simple language testing framework designed to help when you are testing
-//! things like compilers and virtual machines. It allows users to embed simple tests for process
-//! success/failure and for stderr/stdout inside a source file. It is loosely based on the
-//! [`compiletest_rs`](https://crates.io/crates/compiletest_rs) crate, but is much simpler (and
-//! hence sometimes less powerful), and designed to be used for testing non-Rust languages too.
+//! things like compilers and virtual machines. It allows users to express simple tests for process
+//! success/failure and for stderr/stdout, including embedding those tests directlly in the source
+//! file. It is loosely based on the [`compiletest_rs`](https://crates.io/crates/compiletest_rs)
+//! crate, but is much simpler (and hence sometimes less powerful), and designed to be used for
+//! testing non-Rust languages too.
 //!
 //! For example, a Rust language tester, loosely in the spirit of
 //! [`compiletest_rs`](https://crates.io/crates/compiletest_rs), looks as follows:
@@ -12,6 +13,8 @@
 //!
 //! use lang_tester::LangTester;
 //! use tempfile::TempDir;
+//!
+//! static COMMENT_PREFIX: &str = "//";
 //!
 //! fn main() {
 //!     // We use rustc to compile files into a binary: we store those binary files into `tempdir`.
@@ -27,10 +30,11 @@
 //!                 .unwrap()
 //!                 .lines()
 //!                 // Skip non-commented lines at the start of the file.
-//!                 .skip_while(|l| !l.starts_with("//"))
+//!                 .skip_while(|l| !l.starts_with(COMMENT_PREFIX))
 //!                 // Extract consecutive commented lines.
-//!                 .take_while(|l| l.starts_with("//"))
-//!                 .map(|l| &l[2..])
+//!                 .take_while(|l| l.starts_with(COMMENT_PREFIX))
+//!                 // Strip the initial "//" from commented lines.
+//!                 .map(|l| &l[COMMENT_PREFIX.len()..])
 //!                 .collect::<Vec<_>>()
 //!                 .join("\n")
 //!         })
@@ -74,6 +78,22 @@
 //!     let x = 0;
 //!     println!("Hello world");
 //! }
+//! ```
+//!
+//! `lang_tester` is entirely ignorant of the language being tested, leaving it entirely to the
+//! user to determine what the test data in/for a file is. In this case, since we are embedding the
+//! test data as a Rust comment at the start of the file, the `test_extract` function we specified
+//! returns the following string:
+//!
+//! ```text
+//! Compiler:
+//!   stderr:
+//!     warning: unused variable: `x`
+//!       ...unused_var.rs:12:9
+//!       ...
+//!
+//! Run-time:
+//!   stdout: Hello world
 //! ```
 //!
 //! Test data is specified with a two-level indentation syntax: the outer most level of indentation

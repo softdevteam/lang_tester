@@ -2,8 +2,8 @@
 
 This crate provides a simple language testing framework designed to help when
 you are testing things like compilers and virtual machines. It allows users to
-embed simple tests for process success/failure and for stderr/stdout inside a
-source file. It is loosely based on the
+express simple tests for process success/failure and for stderr/stdout, including
+embedding those tests directlly in the source file. It is loosely based on the
 [`compiletest_rs`](https://crates.io/crates/compiletest_rs) crate, but is much
 simpler (and hence sometimes less powerful), and designed to be used for
 testing non-Rust languages too.
@@ -16,6 +16,8 @@ use std::{fs::read_to_string, path::PathBuf, process::Command};
 
 use lang_tester::LangTester;
 use tempfile::TempDir;
+
+static COMMENT_PREFIX: &str = "//";
 
 fn main() {
     // We use rustc to compile files into a binary: we store those binary files
@@ -30,13 +32,13 @@ fn main() {
             read_to_string(p)
                 .unwrap()
                 .lines()
-                    // Skip non-commented lines at the start of the file.
-                    .skip_while(|l| !l.starts_with("//"))
-                    // Extract consecutive commented lines.
-                    .take_while(|l| l.starts_with("//"))
-                    .map(|l| &l[2..])
-                    .collect::<Vec<_>>()
-                    .join("\n")
+                // Skip non-commented lines at the start of the file.
+                .skip_while(|l| !l.starts_with(COMMENT_PREFIX))
+                // Extract consecutive commented lines.
+                .take_while(|l| l.starts_with(COMMENT_PREFIX))
+                .map(|l| &l[COMMENT_PREFIX.len()..])
+                .collect::<Vec<_>>()
+                .join("\n")
         })
         // We have two test commands:
         //   * `Compiler`: runs rustc.
@@ -76,6 +78,23 @@ fn main() {
     let x = 0;
     println!("Hello world");
 }
+```
+
+`lang_tester` is entirely ignorant of the language being tested, leaving it
+entirely to the user to determine what the test data in/for a file is. In this
+case, since we are embedding the test data as a Rust comment at the start of
+the file, the `test_extract` function we specified returns the following
+string:
+
+```
+Compiler:
+  stderr:
+    warning: unused variable: `x`
+      ...unused_var.rs:12:9
+      ...
+
+Run-time:
+  stdout: Hello world
 ```
 
 Test data is specified with a two-level indentation syntax: the outer most
