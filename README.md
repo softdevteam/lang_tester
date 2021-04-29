@@ -34,6 +34,7 @@ fn main() {
                     .skip_while(|l| !l.starts_with("//"))
                     // Extract consecutive commented lines.
                     .take_while(|l| l.starts_with("//"))
+                    // Strip the initial "//" from commented lines.
                     .map(|l| &l[2..])
                     .collect::<Vec<_>>()
                     .join("\n")
