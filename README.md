@@ -17,6 +17,8 @@ use std::{fs::read_to_string, path::PathBuf, process::Command};
 use lang_tester::LangTester;
 use tempfile::TempDir;
 
+static COMMENT_PREFIX: &str = "//";
+
 fn main() {
     // We use rustc to compile files into a binary: we store those binary files
     // into `tempdir`. This may not be necessary for other languages.
@@ -30,14 +32,13 @@ fn main() {
             read_to_string(p)
                 .unwrap()
                 .lines()
-                    // Skip non-commented lines at the start of the file.
-                    .skip_while(|l| !l.starts_with("//"))
-                    // Extract consecutive commented lines.
-                    .take_while(|l| l.starts_with("//"))
-                    // Strip the initial "//" from commented lines.
-                    .map(|l| &l[2..])
-                    .collect::<Vec<_>>()
-                    .join("\n")
+                // Skip non-commented lines at the start of the file.
+                .skip_while(|l| !l.starts_with(COMMENT_PREFIX))
+                // Extract consecutive commented lines.
+                .take_while(|l| l.starts_with(COMMENT_PREFIX))
+                .map(|l| &l[COMMENT_PREFIX.len()..])
+                .collect::<Vec<_>>()
+                .join("\n")
         })
         // We have two test commands:
         //   * `Compiler`: runs rustc.
