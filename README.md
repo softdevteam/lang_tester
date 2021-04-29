@@ -79,6 +79,23 @@ fn main() {
 }
 ```
 
+`lang_tester` is entirely ignorant of the language being tested, leaving it
+entirely to the user to determine what the test data in/for a file is. In this
+case, since we are embedding the test data as a Rust comment at the start of
+the file, the `test_extract` function we specified returns the following
+string:
+
+```
+Compiler:
+  stderr:
+    warning: unused variable: `x`
+      ...unused_var.rs:12:9
+      ...
+
+Run-time:
+  stdout: Hello world
+```
+
 Test data is specified with a two-level indentation syntax: the outer most
 level of indentation defines a test command (multiple command names can be
 specified, as in the above); the inner most level of indentation defines
