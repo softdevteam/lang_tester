@@ -59,7 +59,12 @@ struct LangTesterPooler {
     nocapture: bool,
     test_extract: Option<Box<dyn Fn(&Path) -> String + RefUnwindSafe + Send + Sync>>,
     fm_options: Option<
-        Box<dyn for<'a> Fn(&'a Path, TestStream, FMBuilder<'a>) -> FMBuilder<'a> + Send + Sync>,
+        Box<
+            dyn for<'a> Fn(&'a Path, TestStream, FMBuilder<'a>) -> FMBuilder<'a>
+                + RefUnwindSafe
+                + Send
+                + Sync,
+        >,
     >,
     test_cmds: Option<Box<dyn Fn(&Path) -> Vec<(&str, Command)> + RefUnwindSafe + Send + Sync>>,
 }
@@ -182,7 +187,11 @@ impl LangTester {
     /// ```
     pub fn fm_options<F>(&mut self, fm_options: F) -> &mut Self
     where
-        F: 'static + for<'a> Fn(&'a Path, TestStream, FMBuilder<'a>) -> FMBuilder<'a> + Send + Sync,
+        F: 'static
+            + for<'a> Fn(&'a Path, TestStream, FMBuilder<'a>) -> FMBuilder<'a>
+            + RefUnwindSafe
+            + Send
+            + Sync,
     {
         Arc::get_mut(&mut self.inner).unwrap().fm_options = Some(Box::new(fm_options));
         self
@@ -687,8 +696,21 @@ fn run_tests(
         let stdout_str = test.stdout.join("\n");
         let mut stdout_fmb = FMBuilder::new(&stdout_str).unwrap();
         if let Some(ref fm_options) = inner.fm_options {
-            stderr_fmb = fm_options(path.as_path(), TestStream::Stderr, stderr_fmb);
-            stdout_fmb = fm_options(path.as_path(), TestStream::Stdout, stdout_fmb);
+            match catch_unwind(|| {
+                (
+                    fm_options(path.as_path(), TestStream::Stderr, stderr_fmb),
+                    fm_options(path.as_path(), TestStream::Stdout, stdout_fmb),
+                )
+            }) {
+                Ok((x, y)) => {
+                    stderr_fmb = x;
+                    stdout_fmb = y;
+                }
+                Err(_) => {
+                    failures.lock().unwrap().push((test_fname, failure));
+                    return false;
+                }
+            }
         }
         let match_stderr = stderr_fmb.build().unwrap().matches(&stderr);
         let match_stdout = stdout_fmb.build().unwrap().matches(&stdout);
