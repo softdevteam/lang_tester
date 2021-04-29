@@ -1,8 +1,9 @@
 //! This crate provides a simple language testing framework designed to help when you are testing
-//! things like compilers and virtual machines. It allows users to embed simple tests for process
-//! success/failure and for stderr/stdout inside a source file. It is loosely based on the
-//! [`compiletest_rs`](https://crates.io/crates/compiletest_rs) crate, but is much simpler (and
-//! hence sometimes less powerful), and designed to be used for testing non-Rust languages too.
+//! things like compilers and virtual machines. It allows users to express simple tests for process
+//! success/failure and for stderr/stdout, including embedding those tests directlly in the source
+//! file. It is loosely based on the [`compiletest_rs`](https://crates.io/crates/compiletest_rs)
+//! crate, but is much simpler (and hence sometimes less powerful), and designed to be used for
+//! testing non-Rust languages too.
 //!
 //! For example, a Rust language tester, loosely in the spirit of
 //! [`compiletest_rs`](https://crates.io/crates/compiletest_rs), looks as follows:
