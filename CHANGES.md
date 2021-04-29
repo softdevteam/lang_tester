@@ -1,3 +1,11 @@
+# lang_tester 0.6.0 (2021-04-30)
+
+* If a function passed by the user to the user (e.g. to `test_extract`)
+  `panic`s, `lang_tester` now considers that a test failure and reports it to
+  the user. Because this uses `catch_unwind` underneath, the functions passed
+  to `lang_tester` must now be `RefUnwindSafe`.
+
+
 # lang_tester 0.5.0 (2021-01-27)
 
 * The `test_extract` function signature has changed from:
