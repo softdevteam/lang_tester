@@ -1,4 +1,5 @@
 use std::{
+    cmp::max,
     collections::{hash_map::HashMap, HashSet},
     convert::TryFrom,
     env,
@@ -8,6 +9,7 @@ use std::{
         raw::c_int,
         unix::{io::AsRawFd, process::ExitStatusExt},
     },
+    panic::{catch_unwind, RefUnwindSafe},
     path::{Path, PathBuf, MAIN_SEPARATOR},
     process::{self, Command, ExitStatus},
     str,
@@ -43,7 +45,7 @@ const MAX_WAIT_TIMEOUT: u64 = 250_000_000; // nanoseconds
 
 pub struct LangTester {
     use_cmdline_args: bool,
-    test_file_filter: Option<Box<dyn Fn(&Path) -> bool>>,
+    test_file_filter: Option<Box<dyn Fn(&Path) -> bool + RefUnwindSafe>>,
     cmdline_filters: Option<Vec<String>>,
     inner: Arc<LangTesterPooler>,
 }
@@ -55,11 +57,11 @@ struct LangTesterPooler {
     test_threads: usize,
     ignored: bool,
     nocapture: bool,
-    test_extract: Option<Box<dyn Fn(&Path) -> String + Send + Sync>>,
+    test_extract: Option<Box<dyn Fn(&Path) -> String + RefUnwindSafe + Send + Sync>>,
     fm_options: Option<
         Box<dyn for<'a> Fn(&'a Path, TestStream, FMBuilder<'a>) -> FMBuilder<'a> + Send + Sync>,
     >,
-    test_cmds: Option<Box<dyn Fn(&Path) -> Vec<(&str, Command)> + Send + Sync>>,
+    test_cmds: Option<Box<dyn Fn(&Path) -> Vec<(&str, Command)> + RefUnwindSafe + Send + Sync>>,
 }
 
 /// Specify a given test stream.
@@ -121,7 +123,7 @@ impl LangTester {
     /// Note that `lang_tester` recursively searches directories for files.
     pub fn test_file_filter<F>(&mut self, test_file_filter: F) -> &mut Self
     where
-        F: 'static + Fn(&Path) -> bool,
+        F: 'static + Fn(&Path) -> bool + RefUnwindSafe,
     {
         self.test_file_filter = Some(Box::new(test_file_filter));
         self
@@ -154,7 +156,7 @@ impl LangTester {
     /// ```
     pub fn test_extract<F>(&mut self, test_extract: F) -> &mut Self
     where
-        F: 'static + Fn(&Path) -> String + Send + Sync,
+        F: 'static + Fn(&Path) -> String + RefUnwindSafe + Send + Sync,
     {
         Arc::get_mut(&mut self.inner).unwrap().test_extract = Some(Box::new(test_extract));
         self
@@ -226,7 +228,7 @@ impl LangTester {
     /// ```
     pub fn test_cmds<F>(&mut self, test_cmds: F) -> &mut Self
     where
-        F: 'static + Fn(&Path) -> Vec<(&str, Command)> + Send + Sync,
+        F: 'static + Fn(&Path) -> Vec<(&str, Command)> + RefUnwindSafe + Send + Sync,
     {
         Arc::get_mut(&mut self.inner).unwrap().test_cmds = Some(Box::new(test_cmds));
         self
@@ -271,7 +273,10 @@ impl LangTester {
     /// (e.g. if you have tests `a, b, c` and the user does something like `cargo test b`, 2 tests
     /// (`a` and `c`) will be filtered out. The `PathBuf`s returned are guaranteed to be fully
     /// canonicalised.
-    fn test_files(&self) -> (Vec<PathBuf>, usize) {
+    fn test_files(
+        &self,
+        failures: Arc<Mutex<Vec<(String, TestFailure)>>>,
+    ) -> (Vec<PathBuf>, usize) {
         let mut num_filtered = 0;
         let paths = WalkDir::new(self.inner.test_dir.as_ref().unwrap())
             .into_iter()
@@ -280,7 +285,24 @@ impl LangTester {
             .map(|x| canonicalize(x.into_path()).unwrap())
             // Filter out non-test files
             .filter(|x| match self.test_file_filter.as_ref() {
-                Some(f) => f(x),
+                Some(f) => match catch_unwind(|| f(x)) {
+                    Ok(_) => true,
+                    Err(_) => {
+                        let failure = TestFailure {
+                            status: None,
+                            stdin_remaining: 0,
+                            stderr: None,
+                            stderr_match: None,
+                            stdout: None,
+                            stdout_match: None,
+                        };
+                        failures
+                            .lock()
+                            .unwrap()
+                            .push((x.to_str().unwrap().to_owned(), failure));
+                        false
+                    }
+                },
                 None => true,
             })
             // If the user has named one or more tests on the command-line, run only those,
@@ -346,12 +368,23 @@ impl LangTester {
                 self.cmdline_filters = Some(matches.free);
             }
         }
-        let (test_files, num_filtered) = self.test_files();
-        eprint!("\nrunning {} tests", test_files.len());
+        let failures = Arc::new(Mutex::new(Vec::new()));
+        let (test_files, num_filtered) = self.test_files(Arc::clone(&failures));
         let test_files_len = test_files.len();
-        let (failures, num_ignored) = test_file(test_files, Arc::clone(&self.inner));
+        let num_ignored = if failures.lock().unwrap().is_empty() {
+            eprint!("\nrunning {} tests", test_files.len());
+            test_file(test_files, Arc::clone(&self.inner), Arc::clone(&failures))
+        } else {
+            0
+        };
 
-        self.pp_failures(&failures, test_files_len, num_ignored, num_filtered);
+        let failures = Mutex::into_inner(Arc::try_unwrap(failures).unwrap()).unwrap();
+        self.pp_failures(
+            &failures,
+            max(test_files_len, failures.len()),
+            num_ignored,
+            num_filtered,
+        );
 
         if !failures.is_empty() {
             process::exit(1);
@@ -530,8 +563,8 @@ fn check_names<'a>(cmd_pairs: &[(String, Command)], tests: &HashMap<String, Test
 fn test_file(
     test_files: Vec<PathBuf>,
     inner: Arc<LangTesterPooler>,
-) -> (Vec<(String, TestFailure)>, usize) {
-    let failures = Arc::new(Mutex::new(Vec::new()));
+    failures: Arc<Mutex<Vec<(String, TestFailure)>>>,
+) -> usize {
     let num_ignored = Arc::new(AtomicUsize::new(0));
     let pool = ThreadPool::new(inner.test_threads);
     for p in test_files {
@@ -544,30 +577,44 @@ fn test_file(
             if inner.test_threads == 1 {
                 eprint!("\ntest lang_test::{} ... ", test_fname);
             }
-            let test_str = inner.test_extract.as_ref().unwrap()(p.as_path());
+            let test_extract = inner.test_extract.as_ref().unwrap();
+            match catch_unwind(|| test_extract(p.as_path())) {
+                Ok(test_str) => {
+                    if test_str.is_empty() {
+                        write_ignored(test_fname.as_str(), "test string is empty", inner);
+                        num_ignored.fetch_add(1, Ordering::Relaxed);
+                        return;
+                    }
 
-            if test_str.is_empty() {
-                write_ignored(test_fname.as_str(), "test string is empty", inner);
-                num_ignored.fetch_add(1, Ordering::Relaxed);
-                return;
-            }
+                    let tests = parse_tests(&test_str);
+                    if (inner.ignored && !tests.ignore) || (!inner.ignored && tests.ignore) {
+                        write_ignored(test_fname.as_str(), "", inner);
+                        num_ignored.fetch_add(1, Ordering::Relaxed);
+                        return;
+                    }
 
-            let tests = parse_tests(&test_str);
-            if (inner.ignored && !tests.ignore) || (!inner.ignored && tests.ignore) {
-                write_ignored(test_fname.as_str(), "", inner);
-                num_ignored.fetch_add(1, Ordering::Relaxed);
-                return;
-            }
-
-            if run_tests(Arc::clone(&inner), tests.tests, p, test_fname, failures) {
-                num_ignored.fetch_add(1, Ordering::Relaxed);
-            }
+                    if run_tests(Arc::clone(&inner), tests.tests, p, test_fname, failures) {
+                        num_ignored.fetch_add(1, Ordering::Relaxed);
+                    }
+                }
+                Err(_) => {
+                    let failure = TestFailure {
+                        status: None,
+                        stdin_remaining: 0,
+                        stderr: None,
+                        stderr_match: None,
+                        stdout: None,
+                        stdout_match: None,
+                    };
+                    failures.lock().unwrap().push((test_fname, failure));
+                    return;
+                }
+            };
         });
     }
     pool.join();
-    let failures = Mutex::into_inner(Arc::try_unwrap(failures).unwrap()).unwrap();
 
-    (failures, Arc::try_unwrap(num_ignored).unwrap().into_inner())
+    Arc::try_unwrap(num_ignored).unwrap().into_inner()
 }
 
 /// Convert a test file name to a user-friendly test name (e.g. "lang_tests/a/b.x" might become
@@ -603,12 +650,6 @@ fn run_tests(
         return true;
     }
 
-    let cmd_pairs = inner.test_cmds.as_ref().unwrap()(path.as_path())
-        .into_iter()
-        .map(|(test_name, cmd)| (test_name.to_lowercase(), cmd))
-        .collect::<Vec<_>>();
-    check_names(&cmd_pairs, &tests);
-
     let mut failure = TestFailure {
         status: None,
         stdin_remaining: 0,
@@ -617,6 +658,20 @@ fn run_tests(
         stdout: None,
         stdout_match: None,
     };
+
+    let test_cmds = inner.test_cmds.as_ref().unwrap();
+    let cmd_pairs = match catch_unwind(|| test_cmds(path.as_path())) {
+        Ok(x) => x
+            .into_iter()
+            .map(|(test_name, cmd)| (test_name.to_lowercase(), cmd))
+            .collect::<Vec<_>>(),
+        Err(_) => {
+            failures.lock().unwrap().push((test_fname, failure));
+            return false;
+        }
+    };
+    check_names(&cmd_pairs, &tests);
+
     for (cmd_name, mut cmd) in cmd_pairs {
         let default_test = TestCmd::default();
         let test = tests.get(&cmd_name).unwrap_or(&default_test);
