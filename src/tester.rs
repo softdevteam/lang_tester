@@ -53,7 +53,7 @@ pub struct LangTester {
 /// This is the information shared across test threads and which needs to be hidden behind an
 /// `Arc`.
 struct LangTesterPooler {
-    test_dir: Option<PathBuf>,
+    test_dirs: Vec<PathBuf>,
     test_threads: usize,
     ignored: bool,
     nocapture: bool,
@@ -86,7 +86,7 @@ impl LangTester {
             use_cmdline_args: true,
             cmdline_filters: None,
             inner: Arc::new(LangTesterPooler {
-                test_dir: None,
+                test_dirs: Vec::new(),
                 ignored: false,
                 nocapture: false,
                 test_threads: num_cpus::get(),
@@ -97,12 +97,13 @@ impl LangTester {
         }
     }
 
-    /// Specify the directory where test files are contained. Note that this directory will be
+    /// Specify a directory where test files are contained. Note that this directory will be
     /// searched recursively (i.e. subdirectories and their contents will also be considered as
-    /// potential test files).
+    /// potential test files). Calling this function multiple times adds further directories to the
+    /// list of those searched.
     pub fn test_dir(&mut self, test_dir: &str) -> &mut Self {
         let inner = Arc::get_mut(&mut self.inner).unwrap();
-        inner.test_dir = Some(canonicalize(test_dir).unwrap());
+        inner.test_dirs.push(canonicalize(test_dir).unwrap());
         self
     }
 
@@ -267,8 +268,8 @@ impl LangTester {
 
     /// Make sure the user has specified the minimum set of things we need from them.
     fn validate(&self) {
-        if self.inner.test_dir.is_none() {
-            fatal("test_dir must be specified.");
+        if self.inner.test_dirs.is_empty() {
+            fatal("One or more test directories must be specified.");
         }
         if self.inner.test_extract.is_none() {
             fatal("test_extract must be specified.");
@@ -285,54 +286,61 @@ impl LangTester {
     fn test_files(
         &self,
         failures: Arc<Mutex<Vec<(String, TestFailure)>>>,
-    ) -> (Vec<PathBuf>, usize) {
+    ) -> (Vec<(PathBuf, String)>, usize) {
         let mut num_filtered = 0;
-        let paths = WalkDir::new(self.inner.test_dir.as_ref().unwrap())
-            .into_iter()
-            .filter_map(|x| x.ok())
-            .filter(|x| x.file_type().is_file())
-            .map(|x| canonicalize(x.into_path()).unwrap())
-            // Filter out non-test files
-            .filter(|x| match self.test_file_filter.as_ref() {
-                Some(f) => match catch_unwind(|| f(x)) {
-                    Ok(_) => true,
-                    Err(_) => {
-                        let failure = TestFailure {
-                            status: None,
-                            stdin_remaining: 0,
-                            stderr: None,
-                            stderr_match: None,
-                            stdout: None,
-                            stdout_match: None,
-                        };
-                        failures
-                            .lock()
-                            .unwrap()
-                            .push((x.to_str().unwrap().to_owned(), failure));
-                        false
-                    }
-                },
-                None => true,
-            })
-            // If the user has named one or more tests on the command-line, run only those,
-            // filtering out the rest (counting them as ignored).
-            .filter(|x| {
-                let x_path = x.to_str().unwrap();
-                match self.cmdline_filters.as_ref() {
-                    Some(fs) => {
-                        debug_assert!(self.use_cmdline_args);
-                        for f in fs {
-                            if x_path.contains(f) {
-                                return true;
-                            }
+        let mut paths = Vec::new();
+        for test_dir in &self.inner.test_dirs {
+            let inner_paths = WalkDir::new(test_dir)
+                .into_iter()
+                .filter_map(|x| x.ok())
+                .filter(|x| x.file_type().is_file())
+                .map(|x| canonicalize(x.into_path()).unwrap())
+                // Filter out non-test files
+                .filter(|x| match self.test_file_filter.as_ref() {
+                    Some(f) => match catch_unwind(|| f(x)) {
+                        Ok(_) => true,
+                        Err(_) => {
+                            let failure = TestFailure {
+                                status: None,
+                                stdin_remaining: 0,
+                                stderr: None,
+                                stderr_match: None,
+                                stdout: None,
+                                stdout_match: None,
+                            };
+                            failures
+                                .lock()
+                                .unwrap()
+                                .push((x.to_str().unwrap().to_owned(), failure));
+                            false
                         }
-                        num_filtered += 1;
-                        false
-                    }
+                    },
                     None => true,
-                }
-            })
-            .collect();
+                })
+                // If the user has named one or more tests on the command-line, run only those,
+                // filtering out the rest (counting them as ignored).
+                .filter(|x| {
+                    let x_path = x.to_str().unwrap();
+                    match self.cmdline_filters.as_ref() {
+                        Some(fs) => {
+                            debug_assert!(self.use_cmdline_args);
+                            for f in fs {
+                                if x_path.contains(f) {
+                                    return true;
+                                }
+                            }
+                            num_filtered += 1;
+                            false
+                        }
+                        None => true,
+                    }
+                })
+                .map(|test_fpath| {
+                    let test_fname = test_fname(&test_dir, &test_fpath);
+                    (test_fpath, test_fname)
+                });
+            paths.extend(inner_paths);
+        }
         (paths, num_filtered)
     }
 
@@ -570,15 +578,13 @@ fn check_names<'a>(cmd_pairs: &[(String, Command)], tests: &HashMap<String, Test
 
 /// Run every test in `test_files`, returning a tuple `(failures, num_ignored)`.
 fn test_file(
-    test_files: Vec<PathBuf>,
+    test_files: Vec<(PathBuf, String)>,
     inner: Arc<LangTesterPooler>,
     failures: Arc<Mutex<Vec<(String, TestFailure)>>>,
 ) -> usize {
     let num_ignored = Arc::new(AtomicUsize::new(0));
     let pool = ThreadPool::new(inner.test_threads);
-    for p in test_files {
-        let test_fname = test_fname(inner.test_dir.as_ref().unwrap(), &p);
-
+    for (p, test_fname) in test_files {
         let num_ignored = num_ignored.clone();
         let failures = failures.clone();
         let inner = inner.clone();
