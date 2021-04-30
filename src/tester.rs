@@ -295,7 +295,7 @@ impl LangTester {
             // Filter out non-test files
             .filter(|x| match self.test_file_filter.as_ref() {
                 Some(f) => match catch_unwind(|| f(x)) {
-                    Ok(_) => true,
+                    Ok(b) => b,
                     Err(_) => {
                         let failure = TestFailure {
                             status: None,
