@@ -1,3 +1,8 @@
+# lang_tester 0.6.1 (2021-04-30)
+
+* Fix test file filtering.
+
+
 # lang_tester 0.6.0 (2021-04-30)
 
 * If a function passed by the user to the user (e.g. to `test_extract`)
