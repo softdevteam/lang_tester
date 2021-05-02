@@ -122,7 +122,7 @@ changed).
 
 Each test command must define at least one sub-test:
 
-  * `status: <success|failure|signal|<int>>`, where `success` and `failure` map
+  * `status: <success|error|signal|<int>>`, where `success` and `error` map
     to platform specific notions of a command completing successfully or
     unsuccessfully respectively. `signal` checks for termination due to a signal
     on Unix platforms; on non-Unix platforms, the test will be ignored. `<int>`
