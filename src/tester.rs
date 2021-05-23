@@ -198,7 +198,7 @@ impl LangTester {
     }
 
     /// Specify a function which takes a `Path` to a test file and returns a vector containing 1 or
-    /// more `(<name>, <[Command](https://doc.rust-lang.org/std/process/struct.Command.html)>)
+    /// more (`name`, <[`Command`](https://doc.rust-lang.org/std/process/struct.Command.html)>)
     /// pairs. The commands will be executed in order on the test file: for each executed command,
     /// test commands starting with `<name>` will be checked. For example, if your pipeline
     /// requires separate compilation and linking, you might specify something along the lines of
