@@ -841,9 +841,9 @@ fn run_cmd(
         .spawn()
         .unwrap_or_else(|_| fatal(&format!("Couldn't run command {:?}.", cmd)));
 
-    let stdin = child.stdin.as_mut().unwrap();
-    let stderr = child.stderr.as_mut().unwrap();
-    let stdout = child.stdout.as_mut().unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stderr = child.stderr.take().unwrap();
+    let mut stdout = child.stdout.take().unwrap();
 
     let stdin_fd = stdin.as_raw_fd();
     let stderr_fd = stderr.as_raw_fd();
@@ -907,9 +907,13 @@ fn run_cmd(
                 }
                 if stdin_off == stdin_str.len() {
                     stdin_finished = true;
-                    // This is a bit icky, because the `stdin` variable will later close stdin when the
-                    // variable is dropped. However, some programs expect stdin to be closed before
-                    // they'll continue, so this is the least worst option.
+                    // If we don't close the child's stdin now, the child process might hang,
+                    // waiting forever for input that will never come. However, if we're not
+                    // careful, we'll close the underlying file handle twice: once here and once
+                    // when Rust drops the `stdin` variable. Since file handles can be reused that
+                    // means we could close a file handle that's now being used elsewhere. Thus
+                    // because we close the child's stdin here, we need to make sure we `forget`
+                    // the `stdin` variable at every return point from this function.
                     unsafe {
                         close(stdin_fd);
                     }
@@ -1009,6 +1013,9 @@ fn run_cmd(
     };
 
     let stdin_remaining = if stdin_finished {
+        // We closed the child's stdin earlier, so we must make sure not to close it again, since
+        // the file handle is stale and may have been reused in the interim.
+        std::mem::forget(stdin);
         0
     } else {
         let stdin_str = test.stdin.as_ref().unwrap();
