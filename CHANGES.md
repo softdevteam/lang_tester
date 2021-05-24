@@ -1,3 +1,12 @@
+# lang_tester 0.6.2 (2021-05-24)
+
+* Fix file descriptor race for tests that contain stdin data: files were closed
+  twice, which could lead to an active (reused) file descriptor being closed
+  incorrectly.
+
+* Documentation fixes.
+
+
 # lang_tester 0.6.1 (2021-04-30)
 
 * Fix test file filtering.
