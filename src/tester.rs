@@ -616,7 +616,6 @@ fn test_file(
                         stdout_match: None,
                     };
                     failures.lock().unwrap().push((test_fname, failure));
-                    return;
                 }
             };
         });
