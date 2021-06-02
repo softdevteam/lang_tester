@@ -809,14 +809,13 @@ fn run_tests(
                 .set_color(ColorSpec::new().set_fg(Some(Color::Red)))
                 .ok();
             handle.write_all(b"FAILED").ok();
-            handle.reset().ok();
         } else {
             handle
                 .set_color(ColorSpec::new().set_fg(Some(Color::Green)))
                 .ok();
             handle.write_all(b"ok").ok();
-            handle.reset().ok();
         }
+        handle.reset().ok();
     }
 
     false
