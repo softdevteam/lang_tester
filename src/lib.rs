@@ -144,7 +144,7 @@
 //!     command-line argument to the command (in addition to those specified by the `test_cmds`
 //!     function). `extra-arg` can be specified multiple times, each adding an additional
 //!     command-line argument.
-//!   * stdin: <string>`, text to be passed to the command's `stdin`. If the command exits without
+//!   * `stdin: <string>`, text to be passed to the command's `stdin`. If the command exits without
 //!     having consumed all of `<string>`, an error will be raised. Note, though, that operating
 //!     system file buffers can mean that the command *appears* to have consumed all of `<string>`
 //!     without it actually having done so.
