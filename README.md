@@ -143,9 +143,10 @@ Each test command must define at least one sub-test:
 Test commands can alter the general command by specifying zero or more of the
 following:
 
-  * `extra-args: <arg 1> [... <arg n>]`, where each space separated argument
-    will be appended, in order, to those arguments specified as part of
-    the `test_cmds` function.
+  * `extra-args: <string>` specifies a string which will be passed as an
+    additional command-line argument to the command (in addition to those
+    specified by the `test_cmds` function). Multiple `extra-args` can be
+    specified, each adding an additional command-line argument.
  * `stdin: <string>`, text to be passed to the command's `stdin`. If the
    command exits without having consumed all of `<string>`, an error will be
    raised. Note, though, that operating system file buffers can mean that the
