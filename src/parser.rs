@@ -49,6 +49,22 @@ pub(crate) fn parse_tests(test_str: &str) -> Tests {
                     let (end_line_off, key, val) = key_multiline_val(&lines, line_off, sub_indent);
                     line_off = end_line_off;
                     match key {
+                        "env-var" => {
+                            let val_str = val.join("\n");
+                            match val_str.find("=") {
+                                Some(i) => {
+                                    let key = val_str[..i].trim().to_owned();
+                                    let var = val_str[i + 1..].trim().to_owned();
+                                    testcmd.env.insert(key, var);
+                                }
+                                None => {
+                                    fatal(&format!(
+                                        "'{}' is not in the format '<key>=<string>' on line {}",
+                                        val_str, line_off
+                                    ));
+                                }
+                            }
+                        }
                         "extra-arg" => {
                             let val_str = val.join("\n");
                             testcmd.args.push(val_str);
