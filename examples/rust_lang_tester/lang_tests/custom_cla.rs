@@ -1,10 +1,11 @@
 // Run-time:
-//   extra-args: 1
-//   extra-args: 2
+//   extra-arg: 1
+//   extra-arg: 2 3
 
 use std::env;
 
 fn main() {
+    println!("{:?}", env::args());
     let arg1 = env::args()
         .nth(1)
         .expect("no arg 1 passed")
@@ -13,8 +14,6 @@ fn main() {
 
     let arg2 = env::args()
         .nth(2)
-        .expect("no arg 2 passed")
-        .parse::<i32>()
-        .expect("arg 2 should be numeric");
-    assert!( arg1 < arg2)
+        .unwrap();
+    assert_eq!(arg2, "2 3");
 }
