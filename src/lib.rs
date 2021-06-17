@@ -140,6 +140,10 @@
 //!
 //! Test commands can alter the general command by specifying zero or more of the following:
 //!
+//!   * `env-var: <key>=<string>` will set (or override if it is already present) the
+//!     environment variable `<key>` to the value `<string>`. `env-var` can be specified
+//!     multiple times, each setting an additional (or overriding an existing) environment
+//!     variable.
 //!   * `extra-arg: <string>` specifies a string which will be passed as an additional
 //!     command-line argument to the command (in addition to those specified by the `test_cmds`
 //!     function). `extra-arg` can be specified multiple times, each adding an additional

@@ -486,6 +486,7 @@ pub(crate) struct TestCmd<'a> {
     /// A list of custom command line arguments which should be passed when
     /// executing the test command.
     pub args: Vec<String>,
+    pub env: HashMap<String, String>,
 }
 
 impl<'a> TestCmd<'a> {
@@ -496,6 +497,7 @@ impl<'a> TestCmd<'a> {
             stderr: vec!["..."],
             stdout: vec!["..."],
             args: Vec::new(),
+            env: HashMap::new(),
         }
     }
 }
@@ -684,6 +686,7 @@ fn run_tests(
         let default_test = TestCmd::default();
         let test = tests.get(&cmd_name).unwrap_or(&default_test);
         cmd.args(&test.args);
+        cmd.envs(&test.env);
         let (status, stdin_remaining, stderr, stdout) =
             run_cmd(inner.clone(), &test_fname, cmd, &test);
 
