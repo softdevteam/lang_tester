@@ -65,7 +65,7 @@ pub(crate) fn parse_tests(test_str: &str) -> Tests {
                                 }
                             }
                         }
-                        "extra-arg" => {
+                        "exec-arg" => {
                             let val_str = val.join("\n");
                             testcmd.args.push(val_str);
                         }
