@@ -147,9 +147,9 @@ following:
     the environment variable `<key>` to the value `<string>`. `env-var` can be
     specified multiple times, each setting an additional (or overriding an
     existing) environment variable.
-  * `extra-arg: <string>` specifies a string which will be passed as an
+  * `exec-arg: <string>` specifies a string which will be passed as an
     additional command-line argument to the command (in addition to those
-    specified by the `test_cmds` function). Multiple `extra-arg`s can be
+    specified by the `test_cmds` function). Multiple `exec-arg`s can be
     specified, each adding an additional command-line argument.
   * `stdin: <string>`, text to be passed to the command's `stdin`. If the
     command exits without having consumed all of `<string>`, an error will be

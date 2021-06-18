@@ -1,6 +1,6 @@
 // Run-time:
-//   extra-arg: 1
-//   extra-arg: 2 3
+//   exec-arg: 1
+//   exec-arg: 2 3
 
 use std::env;
 
