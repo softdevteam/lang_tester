@@ -1,3 +1,22 @@
+# lang_tester 0.7.0 (2021-06-18)
+
+## Breaking changes
+
+* The `extra-args` key has been renamed to `exec-arg` to reflect the fact that
+  each key is a single argument.
+
+## Other changes
+
+* The `env-var` key has been added. This allows environment variables to be set
+  on a per-test basis e.g.:
+
+```
+Compiler:
+  env-var: DEBUG=1
+  stdout: xyz
+```
+
+
 # lang_tester 0.6.2 (2021-05-24)
 
 * Fix file descriptor race for tests that contain stdin data: files were closed
