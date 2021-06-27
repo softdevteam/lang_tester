@@ -534,7 +534,7 @@ fn write_ignored(test_name: &str, message: &str, inner: Arc<LangTesterPooler>) {
     let mut handle = stderr.lock();
     if inner.test_threads > 1 {
         handle
-            .write_all(&format!("\ntest lang_tests::{} ... ", test_name).as_bytes())
+            .write_all(format!("\ntest lang_tests::{} ... ", test_name).as_bytes())
             .ok();
     }
     handle
@@ -688,7 +688,7 @@ fn run_tests(
         cmd.args(&test.args);
         cmd.envs(&test.env);
         let (status, stdin_remaining, stderr, stdout) =
-            run_cmd(inner.clone(), &test_fname, cmd, &test);
+            run_cmd(inner.clone(), &test_fname, cmd, test);
 
         let mut meant_to_error = false;
 
@@ -793,7 +793,7 @@ fn run_tests(
         let mut handle = stderr.lock();
         if inner.test_threads > 1 {
             handle
-                .write_all(&format!("\ntest lang_tests::{} ... ", test_fname).as_bytes())
+                .write_all(format!("\ntest lang_tests::{} ... ", test_fname).as_bytes())
                 .ok();
         }
         if failure
@@ -929,7 +929,7 @@ fn run_cmd(
                         let utf8 = str::from_utf8(&buf[..i]).unwrap_or_else(|_| {
                             fatal(&format!("Can't convert stderr from '{:?}' into UTF-8", cmd))
                         });
-                        cap_stderr.push_str(&utf8);
+                        cap_stderr.push_str(utf8);
                         if inner.nocapture {
                             eprint!("{}", utf8);
                         }
@@ -943,7 +943,7 @@ fn run_cmd(
                         let utf8 = str::from_utf8(&buf[..i]).unwrap_or_else(|_| {
                             fatal(&format!("Can't convert stdout from '{:?}' into UTF-8", cmd))
                         });
-                        cap_stdout.push_str(&utf8);
+                        cap_stdout.push_str(utf8);
                         if inner.nocapture {
                             print!("{}", utf8);
                         }

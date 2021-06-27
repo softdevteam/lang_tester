@@ -51,7 +51,7 @@ pub(crate) fn parse_tests(test_str: &str) -> Tests {
                     match key {
                         "env-var" => {
                             let val_str = val.join("\n");
-                            match val_str.find("=") {
+                            match val_str.find('=') {
                                 Some(i) => {
                                     let key = val_str[..i].trim().to_owned();
                                     let var = val_str[i + 1..].trim().to_owned();
