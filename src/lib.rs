@@ -116,11 +116,6 @@
 //! (all) trailing whitespace, `fm` ignores leading and trailing whitespace by default (though this
 //! can be changed).
 //!
-//! String matching is performed by the [fm crate](https://crates.io/crates/fm), which provides
-//! support for `...` operators and so on. Unless `lang_tester` is explicitly instructed otherwise,
-//! it uses `fm`'s defaults. Thus, for example, while `lang_tester` preserves trailing whitespace,
-//! `fm`'s default is to ignore trailing whitespace.
-//!
 //! Each test command must define at least one sub-test:
 //!
 //!   * `status: <success|error|signal|<int>>`, where `success` and `error` map to platform
