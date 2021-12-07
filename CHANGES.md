@@ -1,3 +1,8 @@
+# lang_tester 0.7.1 (2021-12-07)
+
+* Show a test as failing if `FMBuilder` throws an error.
+
+
 # lang_tester 0.7.0 (2021-06-18)
 
 ## Breaking changes
