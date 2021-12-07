@@ -714,8 +714,21 @@ fn run_tests(
                 }
             }
         }
-        let match_stderr = stderr_fmb.build().unwrap().matches(&stderr);
-        let match_stdout = stdout_fmb.build().unwrap().matches(&stdout);
+
+        let match_stderr = match stderr_fmb.build() {
+            Ok(x) => x.matches(&stderr),
+            Err(e) => {
+                failure.stderr = Some(format!("FM error: {}", e));
+                break;
+            }
+        };
+        let match_stdout = match stdout_fmb.build() {
+            Ok(x) => x.matches(&stdout),
+            Err(e) => {
+                failure.stdout = Some(format!("FM error: {}", e));
+                break;
+            }
+        };
 
         // First, check whether the tests passed.
         let pass_status = match test.status {
