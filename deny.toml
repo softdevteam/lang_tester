@@ -2,8 +2,8 @@
 unlicensed = "deny"
 confidence-threshold = 1.0
 allow = [
+    "0BSD",
     "Apache-2.0",
-    "BSD-3-Clause",
     "MIT",
     "Unlicense"
 ]
