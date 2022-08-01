@@ -1,8 +1,0 @@
-language: rust
-before_script:
-    - rustup component add clippy rustfmt
-script:
-    - cargo fmt --all -- --check
-    - cargo test --all
-    - cargo run --example=rust_lang_tester
-    - cargo clippy --all-targets -- -D warnings
