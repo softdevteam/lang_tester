@@ -355,10 +355,20 @@ impl LangTester {
                     "Number of threads used for running tests in parallel",
                     "n_threads",
                 )
+                .optflag("", "exact", "Print the test output exactly.")
+                .optflag("", "list", "List all the tests which can be run.")
+                .optopt("", "format", "Specify the output format", "This is currently silently ignored.")
                 .parse(&args[1..])
                 .unwrap_or_else(|_| usage());
             if matches.opt_present("h") {
                 usage();
+            }
+            if matches.opt_present("list") {
+                if !matches.opt_present("ignored") {
+                    println!("lang_tester: test");
+                }
+
+                std::process::exit(0);
             }
             if matches.opt_present("ignored") {
                 Arc::get_mut(&mut self.inner).unwrap().ignored = true;
