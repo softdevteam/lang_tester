@@ -24,7 +24,8 @@ use std::{
 use fm::{FMBuilder, FMatchError};
 use getopts::Options;
 use libc::{
-    close, fcntl, poll, pollfd, F_GETFL, F_SETFL, O_NONBLOCK, POLLERR, POLLHUP, POLLIN, POLLOUT,
+    close, fcntl, poll, pollfd, F_GETFL, F_SETFL, O_NONBLOCK, POLLERR, POLLHUP, POLLIN, POLLNVAL,
+    POLLOUT,
 };
 use termcolor::{Color, ColorChoice, ColorSpec, StandardStream, WriteColor};
 use threadpool::ThreadPool;
@@ -862,48 +863,112 @@ fn run_cmd(
     let stdin_fd = stdin.as_raw_fd();
     let stderr_fd = stderr.as_raw_fd();
     let stdout_fd = stdout.as_raw_fd();
-    if set_nonblock(stdin_fd)
+    if let Err(e) = set_nonblock(stdin_fd)
         .and_then(|_| set_nonblock(stderr_fd))
         .and_then(|_| set_nonblock(stdout_fd))
-        .is_err()
     {
-        fatal("Couldn't set stdin and/or stderr and/or stdout to be non-blocking");
+        fatal(&format!(
+            "Couldn't set stdin and/or stderr and/or stdout to be non-blocking: {e:}"
+        ));
     }
+
+    const POLL_STDIN: usize = 0;
+    const POLL_STDERR: usize = 1;
+    const POLL_STDOUT: usize = 2;
 
     let mut cap_stderr = String::new();
     let mut cap_stdout = String::new();
-    let mut pollfds = [
-        pollfd {
-            fd: stdin_fd,
-            events: 0,
-            revents: 0,
-        },
-        pollfd {
-            fd: stderr_fd,
-            events: POLLERR | POLLIN | POLLHUP,
-            revents: 0,
-        },
-        pollfd {
-            fd: stdout_fd,
-            events: POLLERR | POLLIN | POLLHUP,
-            revents: 0,
-        },
-    ];
     let mut stdin_off = 0;
-    let mut stdin_finished;
-    if test.stdin.is_none() {
-        stdin_finished = true;
-    } else {
-        stdin_finished = false;
-        pollfds[0].events = POLLERR | POLLOUT | POLLHUP;
-    }
     let mut buf = [0; READBUF];
     let start = Instant::now();
     let mut last_warning = Instant::now();
     let mut next_warning = last_warning
         .checked_add(Duration::from_secs(TIMEOUT))
         .unwrap();
+
+    // Has this file reached EOF and thus been closed?
+    const STATUS_EOF: u8 = 1;
+    // Has this file hit an error and thus been closed? Note that EOF and ERR
+    // are mutually exclusive.
+    const STATUS_ERR: u8 = 2;
+
+    let mut statuses: [u8; 3] = [0, 0, 0];
+    if test.stdin.is_none() {
+        unsafe {
+            close(stdin_fd);
+        }
+        statuses[POLL_STDIN] = STATUS_EOF;
+    }
     loop {
+        // Are all files successfully closed?
+        if statuses[POLL_STDIN] == STATUS_EOF
+            && statuses[POLL_STDERR] == STATUS_EOF
+            && statuses[POLL_STDOUT] == STATUS_EOF
+        {
+            // If there's still stuff in the buffer to write out, we've failed.
+            if let Some(stdin_str) = &test.stdin {
+                if stdin_off < stdin_str.len() {
+                    fatal(&format!("{} failed to consume all of stdin", test_fname));
+                }
+            }
+            break;
+        }
+
+        // Is at least one file in an error state and the other files are
+        // closed?
+        if statuses[POLL_STDIN] & (STATUS_EOF | STATUS_ERR) != 0
+            && statuses[POLL_STDERR] & (STATUS_EOF | STATUS_ERR) != 0
+            && statuses[POLL_STDOUT] & (STATUS_EOF | STATUS_ERR) != 0
+        {
+            fatal(&format!(
+                "{} has left one of stdin/stderr/stdout in an error condition",
+                test_fname
+            ));
+        }
+
+        let mut pollfds = [
+            pollfd {
+                fd: stdin_fd,
+                events: POLLOUT,
+                revents: 0,
+            },
+            pollfd {
+                fd: stderr_fd,
+                events: POLLIN,
+                revents: 0,
+            },
+            pollfd {
+                fd: stdout_fd,
+                events: POLLIN,
+                revents: 0,
+            },
+        ];
+
+        if statuses[POLL_STDIN] & (STATUS_EOF | STATUS_ERR) != 0 {
+            // If the child process won't accept further input, there's no
+            // point polling it.
+            pollfds[POLL_STDIN].fd = -1;
+        } else if let Some(stdin_str) = &test.stdin {
+            if stdin_off == stdin_str.len() {
+                // There's nothing to write to the child's stdin, but we'd still
+                // like to check whether it is closed or has suffered an error,
+                // so we don't want to set the fd to -1.
+                pollfds[POLL_STDIN].events = 0;
+            }
+        }
+
+        if statuses[POLL_STDERR] & (STATUS_EOF | STATUS_ERR) != 0 {
+            // If the child's stderr cannot produce further output, there's no
+            // point polling it.
+            pollfds[POLL_STDERR].fd = -1;
+        }
+
+        if statuses[POLL_STDOUT] & (STATUS_EOF | STATUS_ERR) != 0 {
+            // If the child's stdout cannot produce further output, there's no
+            // point polling it.
+            pollfds[POLL_STDOUT].fd = -1;
+        }
+
         let timeout = i32::try_from(
             next_warning
                 .checked_duration_since(Instant::now())
@@ -912,63 +977,130 @@ fn run_cmd(
         )
         .unwrap_or(1000);
         if unsafe { poll((&mut pollfds) as *mut _ as *mut pollfd, 3, timeout) } != -1 {
-            if pollfds[0].revents & POLLOUT == POLLOUT {
-                // This unwrap() is safe as long as POLLOUT is removed from stdin's events when
-                // stdin is closed.
-                let stdin_str = test.stdin.as_ref().unwrap();
-                if let Ok(i) = stdin.write(&stdin_str.as_bytes()[stdin_off..]) {
-                    stdin_off += i;
+            assert_eq!(pollfds[POLL_STDIN].revents & POLLNVAL, 0);
+            if pollfds[POLL_STDIN].revents & POLLERR != 0 {
+                assert!(test.stdin.is_some());
+                statuses[POLL_STDIN] = STATUS_ERR;
+                unsafe {
+                    close(stdin_fd);
                 }
+            } else if pollfds[POLL_STDIN].revents & POLLOUT != 0 {
+                let stdin_str = test.stdin.as_ref().unwrap();
+                match stdin.write(&stdin_str.as_bytes()[stdin_off..]) {
+                    Ok(i) => stdin_off += i,
+                    Err(e) => {
+                        if e.kind() != io::ErrorKind::Interrupted {
+                            unsafe {
+                                close(stdin_fd);
+                            }
+                            statuses[POLL_STDIN] = STATUS_ERR;
+                        }
+                    }
+                }
+                debug_assert!(stdin_off <= stdin_str.len());
                 if stdin_off == stdin_str.len() {
-                    stdin_finished = true;
-                    // If we don't close the child's stdin now, the child process might hang,
-                    // waiting forever for input that will never come. However, if we're not
-                    // careful, we'll close the underlying file handle twice: once here and once
-                    // when Rust drops the `stdin` variable. Since file handles can be reused that
-                    // means we could close a file handle that's now being used elsewhere. Thus
-                    // because we close the child's stdin here, we need to make sure we `forget`
-                    // the `stdin` variable at every return point from this function.
+                    // We've fully written to the child's stdin. We close the child's stdin
+                    // explicitly otherwise some child processes will hang, waiting for more input
+                    // to be received.
                     unsafe {
                         close(stdin_fd);
                     }
-                    // Remove POLLOUT from events so that we don't try reading anything again.
-                    pollfds[0].events = POLLERR | POLLHUP;
+                    statuses[POLL_STDIN] = STATUS_EOF;
                 }
+            } else if pollfds[POLL_STDIN].revents & POLLHUP != 0 {
+                // POSiX specifies that POLLOUT and POLLHUP are mutually exclusive.
+                unsafe {
+                    close(stdin_fd);
+                }
+                statuses[POLL_STDIN] = STATUS_EOF;
             }
 
-            if pollfds[1].revents & POLLIN == POLLIN {
-                if let Ok(i) = stderr.read(&mut buf) {
-                    if i > 0 {
-                        let utf8 = str::from_utf8(&buf[..i]).unwrap_or_else(|_| {
-                            fatal(&format!("Can't convert stderr from '{:?}' into UTF-8", cmd))
-                        });
-                        cap_stderr.push_str(utf8);
-                        if inner.nocapture {
-                            eprint!("{}", utf8);
+            assert_eq!(pollfds[POLL_STDERR].revents & POLLNVAL, 0);
+            if pollfds[POLL_STDERR].revents & POLLERR != 0 {
+                unsafe {
+                    close(stderr_fd);
+                }
+                statuses[POLL_STDERR] = STATUS_ERR;
+            } else {
+                if pollfds[POLL_STDERR].revents & POLLIN != 0 {
+                    loop {
+                        match stderr.read(&mut buf) {
+                            Ok(i) => {
+                                if i == 0 {
+                                    // We'll pick up POLLHUP on the next poll()
+                                    break;
+                                }
+                                let utf8 = str::from_utf8(&buf[..i]).unwrap_or_else(|_| {
+                                    fatal(&format!(
+                                        "Can't convert stderr from '{:?}' into UTF-8",
+                                        cmd
+                                    ))
+                                });
+                                cap_stderr.push_str(utf8);
+                                if inner.nocapture {
+                                    eprint!("{}", utf8);
+                                }
+                            }
+                            Err(e) if e.kind() == io::ErrorKind::WouldBlock => break,
+                            Err(e) if e.kind() == io::ErrorKind::Interrupted => (),
+                            Err(e) => {
+                                fatal(&format!("{}: failed to read stderr: {e:}", test_fname))
+                            }
                         }
                     }
                 }
-            }
-
-            if pollfds[2].revents & POLLIN == POLLIN {
-                if let Ok(i) = stdout.read(&mut buf) {
-                    if i > 0 {
-                        let utf8 = str::from_utf8(&buf[..i]).unwrap_or_else(|_| {
-                            fatal(&format!("Can't convert stdout from '{:?}' into UTF-8", cmd))
-                        });
-                        cap_stdout.push_str(utf8);
-                        if inner.nocapture {
-                            print!("{}", utf8);
-                        }
+                if pollfds[POLL_STDERR].revents & POLLHUP != 0 {
+                    // Note that POLLIN and POLLHUP are not mutually exclusive.
+                    unsafe {
+                        close(stderr_fd);
                     }
+                    statuses[POLL_STDERR] = STATUS_EOF;
                 }
             }
 
-            if (stdin_finished || pollfds[0].revents & POLLHUP == POLLHUP)
-                && pollfds[1].revents & POLLHUP == POLLHUP
-                && pollfds[2].revents & POLLHUP == POLLHUP
-            {
-                break;
+            assert_eq!(pollfds[POLL_STDOUT].revents & POLLNVAL, 0);
+            if pollfds[POLL_STDOUT].revents & POLLERR != 0 {
+                unsafe {
+                    close(stdout_fd);
+                }
+                statuses[POLL_STDOUT] = STATUS_ERR;
+            } else {
+                if pollfds[POLL_STDOUT].revents & POLLIN != 0 {
+                    loop {
+                        match stdout.read(&mut buf) {
+                            Ok(i) => {
+                                if i == 0 {
+                                    // We'll pick up POLLHUP on the next poll()
+                                    break;
+                                }
+                                let utf8 = str::from_utf8(&buf[..i]).unwrap_or_else(|_| {
+                                    fatal(&format!(
+                                        "Can't convert stdout from '{:?}' into UTF-8",
+                                        cmd
+                                    ))
+                                });
+                                cap_stdout.push_str(utf8);
+                                if inner.nocapture {
+                                    eprint!("{}", utf8);
+                                }
+                            }
+                            Err(e) if e.kind() == io::ErrorKind::WouldBlock => break,
+                            Err(e) if e.kind() == io::ErrorKind::Interrupted => (),
+                            Err(e) => {
+                                fatal(&format!("{}: failed to read stdout: {e:}", test_fname))
+                            }
+                        }
+                    }
+                }
+                if pollfds[POLL_STDOUT].revents & POLLHUP != 0 {
+                    // Note that POLLIN and POLLHUP are not mutually exclusive.
+                    if statuses[POLL_STDOUT] & STATUS_EOF == 0 {
+                        unsafe {
+                            close(stdout_fd);
+                        }
+                        statuses[POLL_STDOUT] = STATUS_EOF;
+                    }
+                }
             }
         }
 
@@ -987,6 +1119,15 @@ fn run_cmd(
                 .checked_add(Duration::from_secs(TIMEOUT))
                 .unwrap();
         }
+    }
+    if statuses[POLL_STDIN] != 0 {
+        std::mem::forget(stdin);
+    }
+    if statuses[POLL_STDERR] != 0 {
+        std::mem::forget(stderr);
+    }
+    if statuses[POLL_STDOUT] != 0 {
+        std::mem::forget(stdout);
     }
 
     let status = {
@@ -1026,14 +1167,10 @@ fn run_cmd(
         }
     };
 
-    let stdin_remaining = if stdin_finished {
-        // We closed the child's stdin earlier, so we must make sure not to close it again, since
-        // the file handle is stale and may have been reused in the interim.
-        std::mem::forget(stdin);
-        0
-    } else {
-        let stdin_str = test.stdin.as_ref().unwrap();
+    let stdin_remaining = if let Some(stdin_str) = &test.stdin {
         stdin_str.len() - stdin_off
+    } else {
+        0
     };
     (status, stdin_remaining, cap_stderr, cap_stdout)
 }
