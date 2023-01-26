@@ -1,3 +1,8 @@
+# lang_tester 0.7.2 (2021-12-07)
+
+* Fix poll() loop, so the full output of a subcommand is now read properly.
+
+
 # lang_tester 0.7.1 (2021-12-07)
 
 * Show a test as failing if `FMBuilder` throws an error.
