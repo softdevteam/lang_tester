@@ -43,6 +43,9 @@ const TIMEOUT: u64 = 60; // seconds
 const INITIAL_WAIT_TIMEOUT: u64 = 10000; // nanoseconds
 /// The maximum time we should wait() between checking if a child process has exited.
 const MAX_WAIT_TIMEOUT: u64 = 250_000_000; // nanoseconds
+                                           //
+/// The default maximum number of times to rerun a command if it fails and a rerun-if-* matches.
+const DEFAULT_RERUN_AT_MOST: u64 = 3;
 
 pub struct LangTester {
     use_cmdline_args: bool,
@@ -68,6 +71,7 @@ struct LangTesterPooler {
         >,
     >,
     test_cmds: Option<Box<dyn Fn(&Path) -> Vec<(&str, Command)> + RefUnwindSafe + Send + Sync>>,
+    rerun_at_most: u64,
 }
 
 /// Specify a given test stream.
@@ -94,6 +98,7 @@ impl LangTester {
                 fm_options: None,
                 test_extract: None,
                 test_cmds: None,
+                rerun_at_most: DEFAULT_RERUN_AT_MOST,
             }),
         }
     }
@@ -112,6 +117,14 @@ impl LangTester {
     pub fn test_threads(&mut self, test_threads: usize) -> &mut Self {
         let inner = Arc::get_mut(&mut self.inner).unwrap();
         inner.test_threads = test_threads;
+        self
+    }
+
+    /// Specify the maximum number of times to rerun a test if it fails and a rerun-if-* matches.
+    /// Defaults to 3.
+    pub fn rerun_at_most(&mut self, rerun_at_most: u64) -> &mut Self {
+        let inner = Arc::get_mut(&mut self.inner).unwrap();
+        inner.rerun_at_most = rerun_at_most;
         self
     }
 
@@ -694,7 +707,9 @@ fn run_tests(
         let test = tests.get(&cmd_name).unwrap_or(&default_test);
         cmd.args(&test.args);
         cmd.envs(&test.env);
+        let mut rerun = 0;
         loop {
+            rerun += 1;
             let (status, stdin_remaining, stderr, stdout) =
                 run_cmd(inner.clone(), &test_fname, &mut cmd, test);
 
@@ -767,34 +782,36 @@ fn run_tests(
                 && match_stderr.is_ok()
                 && match_stdout.is_ok())
             {
-                if let Some(rerun_if_status) = &test.rerun_if_status {
-                    let rerun = match rerun_if_status {
-                        Status::Success => status.success(),
-                        Status::Error => !status.success(),
-                        Status::Signal => status.signal().is_some(),
-                        Status::Int(i) => status.code() == Some(*i),
-                    };
-                    if rerun {
-                        continue;
-                    }
-                }
-                if test.rerun_if_stderr.is_some() {
-                    match rerun_if_stderr_fmb.build() {
-                        Ok(x) if x.matches(&stderr).is_ok() => continue,
-                        Ok(_) => {}
-                        Err(e) => {
-                            failure.stderr = Some(format!("FM error: {}", e));
-                            break 'a;
+                if rerun <= inner.rerun_at_most {
+                    if let Some(rerun_if_status) = &test.rerun_if_status {
+                        let rerun = match rerun_if_status {
+                            Status::Success => status.success(),
+                            Status::Error => !status.success(),
+                            Status::Signal => status.signal().is_some(),
+                            Status::Int(i) => status.code() == Some(*i),
+                        };
+                        if rerun {
+                            continue;
                         }
                     }
-                }
-                if test.rerun_if_stdout.is_some() {
-                    match rerun_if_stdout_fmb.build() {
-                        Ok(x) if x.matches(&stdout).is_ok() => continue,
-                        Ok(_) => {}
-                        Err(e) => {
-                            failure.stdout = Some(format!("FM error: {}", e));
-                            break 'a;
+                    if test.rerun_if_stderr.is_some() {
+                        match rerun_if_stderr_fmb.build() {
+                            Ok(x) if x.matches(&stderr).is_ok() => continue,
+                            Ok(_) => {}
+                            Err(e) => {
+                                failure.stderr = Some(format!("FM error: {}", e));
+                                break 'a;
+                            }
+                        }
+                    }
+                    if test.rerun_if_stdout.is_some() {
+                        match rerun_if_stdout_fmb.build() {
+                            Ok(x) if x.matches(&stdout).is_ok() => continue,
+                            Ok(_) => {}
+                            Err(e) => {
+                                failure.stdout = Some(format!("FM error: {}", e));
+                                break 'a;
+                            }
                         }
                     }
                 }

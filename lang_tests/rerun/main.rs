@@ -32,6 +32,7 @@ fn main() {
     }
 
     LangTester::new()
+        .rerun_at_most(5)
         .test_dir("lang_tests/rerun/")
         .test_file_filter(|p| p.extension().unwrap().to_str().unwrap() == "py")
         .test_extract(|p| {
