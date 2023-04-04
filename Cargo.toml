@@ -17,6 +17,11 @@ path = "examples/rust_lang_tester/run_tests.rs"
 name = "fm_options"
 path = "examples/fm_options/run_tests.rs"
 
+[[test]]
+name = "lang_tests"
+path = "lang_tests/rerun/main.rs"
+harness = false
+
 [dependencies]
 fm = "0.2"
 getopts = "0.2"

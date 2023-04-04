@@ -488,6 +488,9 @@ pub(crate) struct TestCmd<'a> {
     /// executing the test command.
     pub args: Vec<String>,
     pub env: HashMap<String, String>,
+    pub rerun_if_status: Option<Status>,
+    pub rerun_if_stderr: Option<Vec<&'a str>>,
+    pub rerun_if_stdout: Option<Vec<&'a str>>,
 }
 
 impl<'a> TestCmd<'a> {
@@ -499,6 +502,9 @@ impl<'a> TestCmd<'a> {
             stdout: vec!["..."],
             args: Vec::new(),
             env: HashMap::new(),
+            rerun_if_status: None,
+            rerun_if_stderr: None,
+            rerun_if_stdout: None,
         }
     }
 }
@@ -683,71 +689,116 @@ fn run_tests(
     };
     check_names(&cmd_pairs, &tests);
 
-    for (cmd_name, mut cmd) in cmd_pairs {
+    'a: for (cmd_name, mut cmd) in cmd_pairs {
         let default_test = TestCmd::default();
         let test = tests.get(&cmd_name).unwrap_or(&default_test);
         cmd.args(&test.args);
         cmd.envs(&test.env);
-        let (status, stdin_remaining, stderr, stdout) =
-            run_cmd(inner.clone(), &test_fname, cmd, test);
+        loop {
+            let (status, stdin_remaining, stderr, stdout) =
+                run_cmd(inner.clone(), &test_fname, &mut cmd, test);
 
-        let mut meant_to_error = false;
+            let mut meant_to_error = false;
 
-        // Give the user the option of setting options for the fuzzy matchers.
-        let stderr_str = test.stderr.join("\n");
-        let mut stderr_fmb = FMBuilder::new(&stderr_str).unwrap();
-        let stdout_str = test.stdout.join("\n");
-        let mut stdout_fmb = FMBuilder::new(&stdout_str).unwrap();
-        if let Some(ref fm_options) = inner.fm_options {
-            match catch_unwind(|| {
-                (
-                    fm_options(path.as_path(), TestStream::Stderr, stderr_fmb),
-                    fm_options(path.as_path(), TestStream::Stdout, stdout_fmb),
-                )
-            }) {
-                Ok((x, y)) => {
-                    stderr_fmb = x;
-                    stdout_fmb = y;
+            // Give the user the option of setting options for the fuzzy matchers.
+            let stderr_str = test.stderr.join("\n");
+            let mut stderr_fmb = FMBuilder::new(&stderr_str).unwrap();
+            let stdout_str = test.stdout.join("\n");
+            let mut stdout_fmb = FMBuilder::new(&stdout_str).unwrap();
+
+            let rerun_if_stderr_str = test.rerun_if_stderr.as_ref().unwrap_or(&vec![]).join("\n");
+            let mut rerun_if_stderr_fmb = FMBuilder::new(&rerun_if_stderr_str).unwrap();
+            let rerun_if_stdout_str = test.rerun_if_stdout.as_ref().unwrap_or(&vec![]).join("\n");
+            let mut rerun_if_stdout_fmb = FMBuilder::new(&rerun_if_stdout_str).unwrap();
+            if let Some(ref fm_options) = inner.fm_options {
+                match catch_unwind(|| {
+                    (
+                        fm_options(path.as_path(), TestStream::Stderr, stderr_fmb),
+                        fm_options(path.as_path(), TestStream::Stdout, stdout_fmb),
+                        fm_options(path.as_path(), TestStream::Stderr, rerun_if_stderr_fmb),
+                        fm_options(path.as_path(), TestStream::Stdout, rerun_if_stdout_fmb),
+                    )
+                }) {
+                    Ok((a, b, c, d)) => {
+                        stderr_fmb = a;
+                        stdout_fmb = b;
+                        rerun_if_stderr_fmb = c;
+                        rerun_if_stdout_fmb = d;
+                    }
+                    Err(_) => {
+                        failures.lock().unwrap().push((test_fname, failure));
+                        return false;
+                    }
                 }
-                Err(_) => {
-                    failures.lock().unwrap().push((test_fname, failure));
-                    return false;
+            }
+
+            let match_stderr = match stderr_fmb.build() {
+                Ok(x) => x.matches(&stderr),
+                Err(e) => {
+                    failure.stderr = Some(format!("FM error: {}", e));
+                    break 'a;
                 }
-            }
-        }
+            };
+            let match_stdout = match stdout_fmb.build() {
+                Ok(x) => x.matches(&stdout),
+                Err(e) => {
+                    failure.stdout = Some(format!("FM error: {}", e));
+                    break 'a;
+                }
+            };
 
-        let match_stderr = match stderr_fmb.build() {
-            Ok(x) => x.matches(&stderr),
-            Err(e) => {
-                failure.stderr = Some(format!("FM error: {}", e));
-                break;
-            }
-        };
-        let match_stdout = match stdout_fmb.build() {
-            Ok(x) => x.matches(&stdout),
-            Err(e) => {
-                failure.stdout = Some(format!("FM error: {}", e));
-                break;
-            }
-        };
+            // First, check whether the tests passed.
+            let pass_status = match test.status {
+                Status::Success => status.success(),
+                Status::Error => {
+                    meant_to_error = true;
+                    !status.success()
+                }
+                Status::Signal => status.signal().is_some(),
+                Status::Int(i) => status.code() == Some(i),
+            };
 
-        // First, check whether the tests passed.
-        let pass_status = match test.status {
-            Status::Success => status.success(),
-            Status::Error => {
-                meant_to_error = true;
-                !status.success()
-            }
-            Status::Signal => status.signal().is_some(),
-            Status::Int(i) => status.code() == Some(i),
-        };
+            // Second, if a test failed, we want to print out everything which didn't match
+            // successfully (i.e. if the stderr test failed, print that out; but, equally, if
+            // stderr wasn't specified as a test, print it out, because the user can't
+            // otherwise know what it contains).
+            if !(pass_status
+                && stdin_remaining == 0
+                && match_stderr.is_ok()
+                && match_stdout.is_ok())
+            {
+                if let Some(rerun_if_status) = &test.rerun_if_status {
+                    let rerun = match rerun_if_status {
+                        Status::Success => status.success(),
+                        Status::Error => !status.success(),
+                        Status::Signal => status.signal().is_some(),
+                        Status::Int(i) => status.code() == Some(*i),
+                    };
+                    if rerun {
+                        continue;
+                    }
+                }
+                if test.rerun_if_stderr.is_some() {
+                    match rerun_if_stderr_fmb.build() {
+                        Ok(x) if x.matches(&stderr).is_ok() => continue,
+                        Ok(_) => {}
+                        Err(e) => {
+                            failure.stderr = Some(format!("FM error: {}", e));
+                            break 'a;
+                        }
+                    }
+                }
+                if test.rerun_if_stdout.is_some() {
+                    match rerun_if_stdout_fmb.build() {
+                        Ok(x) if x.matches(&stdout).is_ok() => continue,
+                        Ok(_) => {}
+                        Err(e) => {
+                            failure.stdout = Some(format!("FM error: {}", e));
+                            break 'a;
+                        }
+                    }
+                }
 
-        // Second, if a test failed, we want to print out everything which didn't match
-        // successfully (i.e. if the stderr test failed, print that out; but, equally, if
-        // stderr wasn't specified as a test, print it out, because the user can't
-        // otherwise know what it contains).
-        if !(pass_status && stdin_remaining == 0 && match_stderr.is_ok() && match_stdout.is_ok()) {
-            if !pass_status || failure.status.is_none() {
                 match test.status {
                     Status::Success | Status::Error => {
                         if status.success() {
@@ -771,31 +822,32 @@ fn run_tests(
                             }))
                     }
                 }
+
+                if match_stderr.is_err() || failure.stderr.is_none() {
+                    failure.stderr = Some(stderr);
+                }
+                if let Err(e) = match_stderr {
+                    failure.stderr_match = Some(e);
+                }
+
+                if match_stdout.is_err() || failure.stdout.is_none() {
+                    failure.stdout = Some(stdout);
+                }
+                if let Err(e) = match_stdout {
+                    failure.stdout_match = Some(e);
+                }
+
+                failure.stdin_remaining = stdin_remaining;
+
+                // If a sub-test failed, bail out immediately, otherwise subsequent sub-tests
+                // will overwrite the failure output!
+                break 'a;
             }
 
-            if match_stderr.is_err() || failure.stderr.is_none() {
-                failure.stderr = Some(stderr);
+            // If a command failed, and we weren't expecting it to, bail out immediately.
+            if !status.success() && meant_to_error {
+                break 'a;
             }
-            if let Err(e) = match_stderr {
-                failure.stderr_match = Some(e);
-            }
-
-            if match_stdout.is_err() || failure.stdout.is_none() {
-                failure.stdout = Some(stdout);
-            }
-            if let Err(e) = match_stdout {
-                failure.stdout_match = Some(e);
-            }
-
-            failure.stdin_remaining = stdin_remaining;
-
-            // If a sub-test failed, bail out immediately, otherwise subsequent sub-tests
-            // will overwrite the failure output!
-            break;
-        }
-
-        // If a command failed, and we weren't expecting it to, bail out immediately.
-        if !status.success() && meant_to_error {
             break;
         }
     }
@@ -841,7 +893,7 @@ fn run_tests(
 fn run_cmd(
     inner: Arc<LangTesterPooler>,
     test_fname: &str,
-    mut cmd: Command,
+    cmd: &mut Command,
     test: &TestCmd,
 ) -> (ExitStatus, usize, String, String) {
     // The basic sequence here is:
