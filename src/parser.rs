@@ -69,7 +69,7 @@ pub(crate) fn parse_tests(test_str: &str) -> Tests {
                             let val_str = val.join("\n");
                             testcmd.args.push(val_str);
                         }
-                        "status" => {
+                        "status" | "rerun-if-status" => {
                             let val_str = val.join("\n");
                             let status = match val_str.to_lowercase().as_str() {
                                 "success" => Status::Success,
@@ -86,7 +86,17 @@ pub(crate) fn parse_tests(test_str: &str) -> Tests {
                                     }
                                 }
                             };
-                            testcmd.status = status;
+                            match key {
+                                "status" => {
+                                    testcmd.status = status;
+                                }
+                                "rerun-if-status" => {
+                                    testcmd.rerun_if_status = Some(status);
+                                }
+                                _ => {
+                                    unreachable!();
+                                }
+                            }
                         }
                         "stdin" => {
                             testcmd.stdin = Some(val.join("\n"));
@@ -96,6 +106,12 @@ pub(crate) fn parse_tests(test_str: &str) -> Tests {
                         }
                         "stdout" => {
                             testcmd.stdout = val;
+                        }
+                        "rerun-if-stderr" => {
+                            testcmd.rerun_if_stderr = Some(val);
+                        }
+                        "rerun-if-stdout" => {
+                            testcmd.rerun_if_stdout = Some(val);
                         }
                         _ => fatal(&format!("Unknown key '{}' on line {}.", key, line_off)),
                     }
