@@ -157,6 +157,19 @@ following:
     command *appears* to have consumed all of `<string>` without it actually
     having done so.
 
+Test commands can specify that a test should be rerun if one of the
+following (optional) is specified and it matches the test's output:
+
+  * `rerun-if-status`: follows the same format as the `status`.
+  * `rerun-if-stderr` and `rerun-if-stdout`: follow the same format as
+     `stderr` and `stdout`.
+
+These can be useful if tests are subject to intermittent errors (e.g. network
+failure) that should not be considered as a failure of the test itself. Test
+commands are rerun at most *n* times, which by default is specified as 3. If no
+`rerun-if-` is specified, then the first time a test fails, it will be reported
+to the users.
+
 The above file thus contains 4 meaningful tests, two specified by the user and
 two implied by defaults: the `Compiler` should succeed (e.g.  return a `0` exit
 code when run on Unix), and its `stderr` output should warn about an unused
