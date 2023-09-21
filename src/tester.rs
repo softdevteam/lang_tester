@@ -334,8 +334,8 @@ impl LangTester {
                 let test_fname = format!(
                     "lang_tests::{}",
                     test_fname(
-                        &self.inner.test_dir.as_ref().map(|x| x.as_path()).unwrap(),
-                        &x.as_path(),
+                        self.inner.test_dir.as_ref().map(|x| x.as_path()).unwrap(),
+                        x.as_path(),
                     )
                 );
                 match self.cmdline_filters.as_ref() {
@@ -581,7 +581,7 @@ fn usage() -> ! {
 /// Check for the case where the user has a test called `X` but `test_cmds` doesn't have a command
 /// with a matching name. This is almost certainly a bug, in the sense that the test can never,
 /// ever fire.
-fn check_names<'a>(cmd_pairs: &[(String, Command)], tests: &HashMap<String, TestCmd<'a>>) {
+fn check_names(cmd_pairs: &[(String, Command)], tests: &HashMap<String, TestCmd>) {
     let cmd_names = cmd_pairs.iter().map(|x| &x.0).collect::<HashSet<_>>();
     let test_names = tests.keys().collect::<HashSet<_>>();
     let diff = test_names

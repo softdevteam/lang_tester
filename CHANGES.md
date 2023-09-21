@@ -1,3 +1,9 @@
+# lang_tester 0.7.4 (2023-09-21)
+
+* Allow test filtering on the full test name (e.g. `lang_tests::a::b::c`)
+  rather than just the leaf (e.g `c`).
+
+
 # lang_tester 0.7.3 (2023-04-06)
 
 * Add support for rerun-if-{status, stderr, stdout}.
