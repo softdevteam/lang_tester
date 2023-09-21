@@ -331,12 +331,18 @@ impl LangTester {
             // If the user has named one or more tests on the command-line, run only those,
             // filtering out the rest (counting them as ignored).
             .filter(|x| {
-                let x_path = x.to_str().unwrap();
+                let test_fname = format!(
+                    "lang_tests::{}",
+                    test_fname(
+                        &self.inner.test_dir.as_ref().map(|x| x.as_path()).unwrap(),
+                        &x.as_path(),
+                    )
+                );
                 match self.cmdline_filters.as_ref() {
                     Some(fs) => {
                         debug_assert!(self.use_cmdline_args);
                         for f in fs {
-                            if x_path.contains(f) {
+                            if test_fname.contains(f) {
                                 return true;
                             }
                         }
