@@ -333,10 +333,7 @@ impl LangTester {
             .filter(|x| {
                 let test_fname = format!(
                     "lang_tests::{}",
-                    test_fname(
-                        self.inner.test_dir.as_ref().map(|x| x.as_path()).unwrap(),
-                        x.as_path(),
-                    )
+                    test_fname(self.inner.test_dir.as_deref().unwrap(), x.as_path(),)
                 );
                 match self.cmdline_filters.as_ref() {
                     Some(fs) => {
