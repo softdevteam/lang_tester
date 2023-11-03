@@ -1,6 +1,6 @@
 //! This crate provides a simple language testing framework designed to help when you are testing
 //! things like compilers and virtual machines. It allows users to express simple tests for process
-//! success/failure and for stderr/stdout, including embedding those tests directlly in the source
+//! success/failure and for stderr/stdout, including embedding those tests directly in the source
 //! file. It is loosely based on the [`compiletest_rs`](https://crates.io/crates/compiletest_rs)
 //! crate, but is much simpler (and hence sometimes less powerful), and designed to be used for
 //! testing non-Rust languages too.
@@ -8,7 +8,7 @@
 //! For example, a Rust language tester, loosely in the spirit of
 //! [`compiletest_rs`](https://crates.io/crates/compiletest_rs), looks as follows:
 //!
-//! ```rust
+//! ```rust,ignore
 //! use std::{fs::read_to_string, path::PathBuf, process::Command};
 //!
 //! use lang_tester::LangTester;
@@ -17,8 +17,8 @@
 //! static COMMENT_PREFIX: &str = "//";
 //!
 //! fn main() {
-//!     // We use rustc to compile files into a binary: we store those binary files into `tempdir`.
-//!     // This may not be necessary for other languages.
+//!     // We use rustc to compile files into a binary: we store those binary files
+//!     // into `tempdir`. This may not be necessary for other languages.
 //!     let tempdir = TempDir::new().unwrap();
 //!     LangTester::new()
 //!         .test_dir("examples/rust_lang_tester/lang_tests")
@@ -33,15 +33,14 @@
 //!                 .skip_while(|l| !l.starts_with(COMMENT_PREFIX))
 //!                 // Extract consecutive commented lines.
 //!                 .take_while(|l| l.starts_with(COMMENT_PREFIX))
-//!                 // Strip the initial "//" from commented lines.
 //!                 .map(|l| &l[COMMENT_PREFIX.len()..])
 //!                 .collect::<Vec<_>>()
 //!                 .join("\n")
 //!         })
 //!         // We have two test commands:
 //!         //   * `Compiler`: runs rustc.
-//!         //   * `Run-time`: if rustc does not error, and the `Compiler` tests succeed, then the
-//!         //     output binary is run.
+//!         //   * `Run-time`: if rustc does not error, and the `Compiler` tests
+//!         //     succeed, then the output binary is run.
 //!         .test_cmds(move |p| {
 //!             // Test command 1: Compile `x.rs` into `tempdir/x`.
 //!             let mut exe = PathBuf::new();
@@ -65,14 +64,12 @@
 //!
 //! ```rust,ignore
 //! // Compiler:
-//! //   status: success
 //! //   stderr:
 //! //     warning: unused variable: `x`
 //! //       ...unused_var.rs:12:9
 //! //       ...
 //! //
 //! // Run-time:
-//! //   status: success
 //! //   stdout: Hello world
 //! fn main() {
 //!     let x = 0;
@@ -120,11 +117,11 @@
 //!
 //!   * `status: <success|error|signal|<int>>`, where `success` and `error` map to platform
 //!     specific notions of a command completing successfully or unsuccessfully respectively.
-//!     `signal` checks for termination due to a signal on Unix platforms; on non-Unix platforms, the
-//!     test will be ignored. `<int>` is a signed integer checking for a specific exit code on platforms
-//!     that support it. If not specified, defaults to `success`.
-//!   * `stderr: [<string>]`, `stdout: [<string>]` match `<string>` against a command's `stderr`
-//!     or `stdout`. The special string `...` can be used as a simple wildcard: if a line consists
+//!     `signal` checks for termination due to a signal on Unix platforms; on non-Unix platforms,
+//!     the test will be ignored. `<int>` is a signed integer checking for a specific exit code on
+//!     platforms that support it. If not specified, defaults to `success`.
+//!   * `stderr: [<string>]`, `stdout: [<string>]` match `<string>` against a command's `stderr` or
+//!     `stdout`. The special string `...` can be used as a simple wildcard: if a line consists
 //!     solely of `...`, it means "match zero or more lines"; if a line begins with `...`, it means
 //!     "match the remainder of the line only"; if a line ends with `...`, it means "match the
 //!     start of the line only". A line may start and end with `...`. Note that `stderr`/`stdout`
@@ -135,21 +132,30 @@
 //!
 //! Test commands can alter the general command by specifying zero or more of the following:
 //!
-//!   * `env-var: <key>=<string>` will set (or override if it is already present) the
-//!     environment variable `<key>` to the value `<string>`. `env-var` can be specified
-//!     multiple times, each setting an additional (or overriding an existing) environment
-//!     variable.
-//!   * `exec-arg: <string>` specifies a string which will be passed as an additional
-//!     command-line argument to the command (in addition to those specified by the `test_cmds`
-//!     function). `exec-arg` can be specified multiple times, each adding an additional
-//!     command-line argument.
+//!   * `env-var: <key>=<string>` will set (or override if it is already present) the environment
+//!     variable `<key>` to the value `<string>`. `env-var` can be specified multiple times, each
+//!     setting an additional (or overriding an existing) environment variable.
+//!   * `exec-arg: <string>` specifies a string which will be passed as an additional command-line
+//!     argument to the command (in addition to those specified by the `test_cmds` function).
+//!     Multiple `exec-arg`s can be specified, each adding an additional command-line argument.
 //!   * `stdin: <string>`, text to be passed to the command's `stdin`. If the command exits without
 //!     having consumed all of `<string>`, an error will be raised. Note, though, that operating
 //!     system file buffers can mean that the command *appears* to have consumed all of `<string>`
 //!     without it actually having done so.
 //!
+//! Test commands can specify that a test should be rerun if one of the following (optional) is
+//! specified and it matches the test's output:
+//!
+//!   * `rerun-if-status`: follows the same format as the `status`.
+//!   * `rerun-if-stderr` and `rerun-if-stdout`: follow the same format as `stderr` and `stdout`.
+//!
+//! These can be useful if tests are subject to intermittent errors (e.g. network failure) that
+//! should not be considered as a failure of the test itself. Test commands are rerun at most *n*
+//! times, which by default is specified as 3. If no `rerun-if-` is specified, then the first time
+//! a test fails, it will be reported to the users.
+//!
 //! The above file thus contains 4 meaningful tests, two specified by the user and two implied by
-//! defaults: the `Compiler` should succeed (e.g.  return a `0` exit code when run on Unix), and
+//! defaults: the `Compiler` should succeed (e.g. return a `0` exit code when run on Unix), and
 //! its `stderr` output should warn about an unused variable on line 12; and the resulting binary
 //! should succeed produce `Hello world` on `stdout`.
 //!
@@ -193,8 +199,11 @@
 //! test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out
 //! ```
 //!
-//! Users will often want to integrate such tests into their test suite. An easy way of doing this
-//! is to add a `[[test]]` entry to your `Cargo.toml` along the following lines:
+//! ## Integration with Cargo.
+//!
+//! Tests created with lang_tester can be used as part of an existing test suite and can be run
+//! with the `cargo test` command. For example, if the Rust source file that runs your lang tests
+//! is `lang_tests/run.rs` then add the following to your Cargo.toml:
 //!
 //! ```text
 //! [[test]]
@@ -202,8 +211,6 @@
 //! path = "lang_tests/run_tests.rs"
 //! harness = false
 //! ```
-//!
-//! Running `cargo test` will now also run your lang tests.
 
 #![allow(clippy::needless_doctest_main)]
 #![allow(clippy::new_without_default)]
