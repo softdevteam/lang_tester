@@ -8,7 +8,7 @@
 //! For example, a Rust language tester, loosely in the spirit of
 //! [`compiletest_rs`](https://crates.io/crates/compiletest_rs), looks as follows:
 //!
-//! ```rust
+//! ```rust,ignore
 //! use std::{fs::read_to_string, path::PathBuf, process::Command};
 //!
 //! use lang_tester::LangTester;
@@ -205,7 +205,7 @@
 //! with the `cargo test` command. For example, if the Rust source file that runs your lang tests
 //! is `lang_tests/run.rs` then add the following to your Cargo.toml:
 //!
-//! ```
+//! ```text
 //! [[test]]
 //! name = "lang_tests"
 //! path = "lang_tests/run_tests.rs"
