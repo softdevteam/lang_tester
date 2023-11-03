@@ -1,3 +1,9 @@
+# lang_tester 0.7.5 (2023-11-03)
+
+* Make the library documentation (rather than the README) the source of
+  documentation truth.
+
+
 # lang_tester 0.7.4 (2023-09-21)
 
 * Allow test filtering on the full test name (e.g. `lang_tests::a::b::c`)
