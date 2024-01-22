@@ -9,7 +9,7 @@ use regex::Regex;
 fn main() {
     LangTester::new()
         .test_dir("examples/fm_options/lang_tests")
-        .test_file_filter(|p| p.extension().unwrap().to_str().unwrap() == "py")
+        .test_path_filter(|p| p.extension().and_then(|x| x.to_str()) == Some("py"))
         .test_extract(|p| {
             read_to_string(p)
                 .unwrap()
