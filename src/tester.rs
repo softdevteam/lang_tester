@@ -49,7 +49,7 @@ const DEFAULT_RERUN_AT_MOST: u64 = 3;
 
 pub struct LangTester {
     use_cmdline_args: bool,
-    test_file_filter: Option<Box<dyn Fn(&Path) -> bool + RefUnwindSafe>>,
+    test_path_filter: Option<Box<dyn Fn(&Path) -> bool + RefUnwindSafe>>,
     cmdline_filters: Option<Vec<String>>,
     inner: Arc<LangTesterPooler>,
 }
@@ -87,7 +87,7 @@ impl LangTester {
     /// [`test_cmds`](#method.test_cmds).
     pub fn new() -> Self {
         LangTester {
-            test_file_filter: None,
+            test_path_filter: None,
             use_cmdline_args: true,
             cmdline_filters: None,
             inner: Arc::new(LangTesterPooler {
@@ -140,11 +140,35 @@ impl LangTester {
     /// ```
     ///
     /// Note that `lang_tester` recursively searches directories for files.
-    pub fn test_file_filter<F>(&mut self, test_file_filter: F) -> &mut Self
+    #[deprecated(
+        since = "0.7.5",
+        note = "Convert `test_file_filter(|p| ...)` to `test_path_fiter(|p| p.is_file() & ...)`"
+    )]
+    pub fn test_file_filter<F>(&mut self, test_path_filter: F) -> &mut Self
     where
         F: 'static + Fn(&Path) -> bool + RefUnwindSafe,
     {
-        self.test_file_filter = Some(Box::new(test_file_filter));
+        self.test_path_filter = Some(Box::new(move |p| p.is_file() && test_path_filter(p)));
+        self
+    }
+
+    /// If `test_path_filter` is specified, only paths for which it returns `true` will be
+    /// considered tests. A common use of this is to filter tests based on filename extensions
+    /// e.g.:
+    ///
+    /// ```rust,ignore
+    /// LangTester::new()
+    ///     ...
+    ///     .test_path_filter(|p| p.extension().and_then(|x| x.to_str()) == Some("rs"))
+    ///     ...
+    /// ```
+    ///
+    /// Note that `lang_tester` recursively searches directories.
+    pub fn test_path_filter<F>(&mut self, test_path_filter: F) -> &mut Self
+    where
+        F: 'static + Fn(&Path) -> bool + RefUnwindSafe,
+    {
+        self.test_path_filter = Some(Box::new(test_path_filter));
         self
     }
 
@@ -304,10 +328,9 @@ impl LangTester {
         let paths = WalkDir::new(self.inner.test_dir.as_ref().unwrap())
             .into_iter()
             .filter_map(|x| x.ok())
-            .filter(|x| x.file_type().is_file())
             .map(|x| canonicalize(x.into_path()).unwrap())
             // Filter out non-test files
-            .filter(|x| match self.test_file_filter.as_ref() {
+            .filter(|x| match self.test_path_filter.as_ref() {
                 Some(f) => match catch_unwind(|| f(x)) {
                     Ok(b) => b,
                     Err(_) => {
