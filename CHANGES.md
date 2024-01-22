@@ -1,3 +1,11 @@
+# lang_tester 0.7.6 (2024-01-22)
+
+* `test_file_filter` is deprecated in favour of `test_path_filter`. The latter
+  doesn't pre-filter non-files, making it more flexible. A simple way of moving
+  from `test_file_filter` to `test_path_filter` is to change
+  `test_file_filter(|p| ...)` to `test_path_fiter(|p| p.is_file() & ...)`.
+
+
 # lang_tester 0.7.5 (2023-11-03)
 
 * Make the library documentation (rather than the README) the source of
