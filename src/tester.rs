@@ -61,6 +61,7 @@ struct LangTesterPooler {
     test_threads: usize,
     ignored: bool,
     nocapture: bool,
+    comment_prefix: Option<String>,
     test_extract: Option<Box<dyn Fn(&Path) -> String + RefUnwindSafe + Send + Sync>>,
     fm_options: Option<
         Box<
@@ -94,6 +95,7 @@ impl LangTester {
                 test_dir: None,
                 ignored: false,
                 nocapture: false,
+                comment_prefix: None,
                 test_threads: num_cpus::get(),
                 fm_options: None,
                 test_extract: None,
@@ -125,6 +127,16 @@ impl LangTester {
     pub fn rerun_at_most(&mut self, rerun_at_most: u64) -> &mut Self {
         let inner = Arc::get_mut(&mut self.inner).unwrap();
         inner.rerun_at_most = rerun_at_most;
+        self
+    }
+
+    /// If set, defines what lines will be treated as comments if, ignoring the current level of
+    /// indentation, they begin with `comment_prefix`.
+    ///
+    /// This option defaults to `None`.
+    pub fn comment_prefix<S: AsRef<str>>(&mut self, comment_prefix: S) -> &mut Self {
+        let inner = Arc::get_mut(&mut self.inner).unwrap();
+        inner.comment_prefix = Some(comment_prefix.as_ref().to_owned());
         self
     }
 
@@ -643,10 +655,13 @@ fn test_file(
                         return;
                     }
 
-                    let tests = parse_tests(&test_str);
+                    let tests = parse_tests(inner.comment_prefix.as_deref(), &test_str);
                     let ignore = if let Some(ignore_if) = tests.ignore_if {
                         Command::new(env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_owned()))
                             .args(["-c", &ignore_if])
+                            .stdin(process::Stdio::piped())
+                            .stderr(process::Stdio::piped())
+                            .stdout(process::Stdio::piped())
                             .status()
                             .unwrap_or_else(|_| {
                                 fatal(&format!("Couldn't run ignore-if '{ignore_if}'"))
