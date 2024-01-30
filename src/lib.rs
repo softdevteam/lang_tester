@@ -138,32 +138,31 @@
 //!   * `exec-arg: <string>` specifies a string which will be passed as an additional command-line
 //!     argument to the command (in addition to those specified by the `test_cmds` function).
 //!     Multiple `exec-arg`s can be specified, each adding an additional command-line argument.
-//!   * `stdin: <string>`, text to be passed to the command's `stdin`. If the command exits without
-//!     having consumed all of `<string>`, an error will be raised. Note, though, that operating
-//!     system file buffers can mean that the command *appears* to have consumed all of `<string>`
-//!     without it actually having done so.
+//!   * `stdin: <string>` specifies text to be passed to the command's `stdin`. If the command
+//!     exits without consuming all of `<string>`, an error will be raised. Note, though, that
+//!     operating system file buffers can mean that the command *appears* to have consumed all of
+//!     `<string>` without it actually having done so.
 //!
 //! Test commands can specify that a test should be rerun if one of the following (optional) is
 //! specified and it matches the test's output:
 //!
-//!   * `rerun-if-status`: follows the same format as the `status`.
-//!   * `rerun-if-stderr` and `rerun-if-stdout`: follow the same format as `stderr` and `stdout`.
+//!   * `rerun-if-status` follows the same format as the `status`.
+//!   * `rerun-if-stderr` and `rerun-if-stdout` follow the same format as `stderr` and `stdout`.
 //!
 //! These can be useful if tests are subject to intermittent errors (e.g. network failure) that
 //! should not be considered as a failure of the test itself. Test commands are rerun at most *n*
 //! times, which by default is specified as 3. If no `rerun-if-` is specified, then the first time
-//! a test fails, it will be reported to the users.
+//! a test fails, it will be reported to the user.
 //!
 //! The above file thus contains 4 meaningful tests, two specified by the user and two implied by
 //! defaults: the `Compiler` should succeed (e.g. return a `0` exit code when run on Unix), and
 //! its `stderr` output should warn about an unused variable on line 12; and the resulting binary
 //! should succeed produce `Hello world` on `stdout`.
 //!
-//! A file's tests can be ignored entirely if a test command `ignore` is defined:
+//! A file's tests can be ignored entirely with:
 //!
-//!   * `ignore: [<string>]`, specifies that this file should be ignored for the reason set out in
-//!     `<string>` (if any). Note that `<string>` is purely for user information and has no effect
-//!     on the running of tests.
+//!   * `ignore-if: <cmd>` defines a shell command that will be run to determine whether to ignore
+//!     this test or not. If `<cmd>` returns 0 the test will be ignored, otherwise it will be run.
 //!
 //! `lang_tester`'s output is deliberately similar to Rust's normal testing output. Running the
 //! example `rust_lang_tester` in this crate produces the following output:

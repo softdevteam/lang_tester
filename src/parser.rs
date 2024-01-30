@@ -6,20 +6,26 @@ use crate::{
 };
 
 /// Parse test data into a set of `Test`s.
-pub(crate) fn parse_tests(test_str: &str) -> Tests {
+pub(crate) fn parse_tests<'a>(comment_prefix: Option<&str>, test_str: &'a str) -> Tests<'a> {
     let lines = test_str.lines().collect::<Vec<_>>();
     let mut tests = HashMap::new();
     let mut line_off = 0;
-    let mut ignore = false;
+    let mut ignore_if = None;
     while line_off < lines.len() {
         let indent = indent_level(&lines, line_off);
         if indent == lines[line_off].len() {
             line_off += 1;
             continue;
         }
+        if let Some(cp) = comment_prefix {
+            if lines[line_off][indent..].starts_with(cp) {
+                line_off += 1;
+                continue;
+            }
+        }
         let (test_name, val) = key_val(&lines, line_off, indent);
-        if test_name == "ignore" {
-            ignore = true;
+        if test_name == "ignore-if" {
+            ignore_if = Some(val.into());
             line_off += 1;
             continue;
         }
@@ -46,7 +52,8 @@ pub(crate) fn parse_tests(test_str: &str) -> Tests {
                     if sub_indent == indent {
                         break;
                     }
-                    let (end_line_off, key, val) = key_multiline_val(&lines, line_off, sub_indent);
+                    let (end_line_off, key, val) =
+                        key_multiline_val(comment_prefix, &lines, line_off, sub_indent);
                     line_off = end_line_off;
                     match key {
                         "env-var" => {
@@ -120,7 +127,7 @@ pub(crate) fn parse_tests(test_str: &str) -> Tests {
             }
         }
     }
-    Tests { ignore, tests }
+    Tests { ignore_if, tests }
 }
 
 fn indent_level(lines: &[&str], line_off: usize) -> usize {
@@ -160,6 +167,7 @@ fn key_val<'a>(lines: &[&'a str], line_off: usize, indent: usize) -> (&'a str, &
 /// Turn one more lines of the format `key: val` (where `val` may spread over many lines) into its
 /// separate components.
 fn key_multiline_val<'a>(
+    comment_prefix: Option<&str>,
     lines: &[&'a str],
     mut line_off: usize,
     indent: usize,
@@ -178,6 +186,12 @@ fn key_multiline_val<'a>(
             }
             if cur_indent <= indent {
                 break;
+            }
+            if let Some(cp) = comment_prefix {
+                if lines[line_off][sub_indent..].starts_with(cp) {
+                    line_off += 1;
+                    continue;
+                }
             }
             val.push(&lines[line_off][sub_indent..]);
             line_off += 1;
@@ -201,22 +215,31 @@ mod test {
 
     #[test]
     fn test_key_multiline() {
-        assert_eq!(key_multiline_val(&["x:", ""], 0, 0), (2, "x", vec![]));
+        assert_eq!(key_multiline_val(None, &["x:", ""], 0, 0), (2, "x", vec![]));
         assert_eq!(
-            key_multiline_val(&["x: y", "  z", "a"], 0, 0),
+            key_multiline_val(None, &["x: y", "  z", "a"], 0, 0),
             (2, "x", vec!["y", "z"])
         );
         assert_eq!(
-            key_multiline_val(&["x:", "  z", "a"], 0, 0),
+            key_multiline_val(None, &["x:", "  z", "a"], 0, 0),
             (2, "x", vec!["z"])
         );
         assert_eq!(
-            key_multiline_val(&["x:", "  z  ", "  a  ", "  ", "b"], 0, 0),
+            key_multiline_val(None, &["x:", "  z  ", "  a  ", "  ", "b"], 0, 0),
             (4, "x", vec!["z  ", "a  "])
         );
         assert_eq!(
-            key_multiline_val(&["x:", "  z  ", "    a  ", "  ", "  b"], 0, 0),
+            key_multiline_val(None, &["x:", "  z  ", "    a  ", "  ", "  b"], 0, 0),
             (5, "x", vec!["z  ", "  a  ", "", "b"])
+        );
+        assert_eq!(
+            key_multiline_val(
+                Some("#"),
+                &["x:", "  z  ", "    a  ", "  # c2", "  ", "  b"],
+                0,
+                0
+            ),
+            (6, "x", vec!["z  ", "  a  ", "", "b"])
         );
     }
 }
