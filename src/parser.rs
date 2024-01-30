@@ -10,7 +10,7 @@ pub(crate) fn parse_tests(test_str: &str) -> Tests {
     let lines = test_str.lines().collect::<Vec<_>>();
     let mut tests = HashMap::new();
     let mut line_off = 0;
-    let mut ignore = false;
+    let mut ignore_if = None;
     while line_off < lines.len() {
         let indent = indent_level(&lines, line_off);
         if indent == lines[line_off].len() {
@@ -18,8 +18,8 @@ pub(crate) fn parse_tests(test_str: &str) -> Tests {
             continue;
         }
         let (test_name, val) = key_val(&lines, line_off, indent);
-        if test_name == "ignore" {
-            ignore = true;
+        if test_name == "ignore-if" {
+            ignore_if = Some(val.into());
             line_off += 1;
             continue;
         }
@@ -120,7 +120,7 @@ pub(crate) fn parse_tests(test_str: &str) -> Tests {
             }
         }
     }
-    Tests { ignore, tests }
+    Tests { ignore_if, tests }
 }
 
 fn indent_level(lines: &[&str], line_off: usize) -> usize {

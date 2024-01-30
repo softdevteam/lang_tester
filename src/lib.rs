@@ -159,11 +159,10 @@
 //! its `stderr` output should warn about an unused variable on line 12; and the resulting binary
 //! should succeed produce `Hello world` on `stdout`.
 //!
-//! A file's tests can be ignored entirely if a test command `ignore` is defined:
+//! A file's tests can be ignored entirely with:
 //!
-//!   * `ignore: [<string>]` specifies that this file should be ignored for the reason set out in
-//!     `<string>` (if any). Note that `<string>` is purely for user information and has no effect
-//!     on the running of tests.
+//!   * `ignore-if: <cmd>` defines a shell command that will be run to determine whether to ignore
+//!     this test or not. If `<cmd>` returns 0 the test will be ignored, otherwise it will be run.
 //!
 //! `lang_tester`'s output is deliberately similar to Rust's normal testing output. Running the
 //! example `rust_lang_tester` in this crate produces the following output:

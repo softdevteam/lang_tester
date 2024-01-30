@@ -1,4 +1,4 @@
-// ignore: this test is intentionally ignored
+// ignore-if: true
 // Compiler:
 //   status: success
 

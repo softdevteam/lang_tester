@@ -550,7 +550,7 @@ impl<'a> TestCmd<'a> {
 
 /// A collection of tests.
 pub(crate) struct Tests<'a> {
-    pub ignore: bool,
+    pub ignore_if: Option<String>,
     pub tests: HashMap<String, TestCmd<'a>>,
 }
 
@@ -644,7 +644,18 @@ fn test_file(
                     }
 
                     let tests = parse_tests(&test_str);
-                    if (inner.ignored && !tests.ignore) || (!inner.ignored && tests.ignore) {
+                    let ignore = if let Some(ignore_if) = tests.ignore_if {
+                        Command::new(env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_owned()))
+                            .args(["-c", &ignore_if])
+                            .status()
+                            .unwrap_or_else(|_| {
+                                fatal(&format!("Couldn't run ignore-if '{ignore_if}'"))
+                            })
+                            .success()
+                    } else {
+                        false
+                    };
+                    if (inner.ignored && !ignore) || (!inner.ignored && ignore) {
                         write_ignored(test_fname.as_str(), "", inner);
                         num_ignored.fetch_add(1, Ordering::Relaxed);
                         return;
