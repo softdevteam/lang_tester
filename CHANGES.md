@@ -1,3 +1,22 @@
+# lang_tester 0.8.0 (2024-01-31)
+
+## Breaking change
+
+* Remove `ignored` and add `ignore-if`. The latter runs an arbitrary shell
+  command which, if it returns zero, causes the test to be ignored. This allows
+  much more flexibility than the overly simplistic "always ignore this test" of
+  `ignored`. Tests with `ignored: <reason>` can be changed to `ignore-if: true`
+  followed (or preceded) by a comment `# <reason>` (assuming `comment_prefix`
+  is set: see below).
+
+## Non-breaking change
+
+* Allow comments in tests with a user-configurable prefix. By default no
+  comment prefix is set. You can set one with `comment_prefix("...")`. For
+  example `LangTester::new().comment_prefix("#")` causes lines in tests
+  starting with `#` to be entirely ignored by lang_tester.
+
+
 # lang_tester 0.7.6 (2024-01-22)
 
 * `test_file_filter` is deprecated in favour of `test_path_filter`. The latter

@@ -24,6 +24,8 @@
 //!         .test_dir("examples/rust_lang_tester/lang_tests")
 //!         // Only use files named `*.rs` as test files.
 //!         .test_path_filter(|p| p.extension().and_then(|x| x.to_str()) == Some("rs"))
+//!         // Treat lines beginning with "#" as comments.
+//!         .comment_prefix("#")
 //!         // Extract the first sequence of commented line(s) as the tests.
 //!         .test_extract(|p| {
 //!             read_to_string(p)
