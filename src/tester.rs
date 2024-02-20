@@ -659,6 +659,7 @@ fn test_file(
                     let ignore = if let Some(ignore_if) = tests.ignore_if {
                         Command::new(env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_owned()))
                             .args(["-c", &ignore_if])
+                            .current_dir(env::var("CARGO_MANIFEST_DIR").unwrap())
                             .stdin(process::Stdio::piped())
                             .stderr(process::Stdio::piped())
                             .stdout(process::Stdio::piped())

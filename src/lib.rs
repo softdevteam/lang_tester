@@ -165,6 +165,7 @@
 //!
 //!   * `ignore-if: <cmd>` defines a shell command that will be run to determine whether to ignore
 //!     this test or not. If `<cmd>` returns 0 the test will be ignored, otherwise it will be run.
+//!     `<cmd>` will have its directory set to `CARGO_MANIFEST_DIR`.
 //!
 //! `lang_tester`'s output is deliberately similar to Rust's normal testing output. Running the
 //! example `rust_lang_tester` in this crate produces the following output:
