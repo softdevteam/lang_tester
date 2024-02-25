@@ -9,7 +9,7 @@
 //! [`compiletest_rs`](https://crates.io/crates/compiletest_rs), looks as follows:
 //!
 //! ```rust,ignore
-//! use std::{fs::read_to_string, path::PathBuf, process::Command};
+//! use std::{env, fs::read_to_string, path::PathBuf, process::Command};
 //!
 //! use lang_tester::LangTester;
 //! use tempfile::TempDir;
