@@ -9,12 +9,10 @@
 //! [`compiletest_rs`](https://crates.io/crates/compiletest_rs), looks as follows:
 //!
 //! ```rust,ignore
-//! use std::{fs::read_to_string, path::PathBuf, process::Command};
+//! use std::{env, fs::read_to_string, path::PathBuf, process::Command};
 //!
 //! use lang_tester::LangTester;
 //! use tempfile::TempDir;
-//!
-//! static COMMENT_PREFIX: &str = "//";
 //!
 //! fn main() {
 //!     // We use rustc to compile files into a binary: we store those binary files
@@ -24,7 +22,7 @@
 //!         .test_dir("examples/rust_lang_tester/lang_tests")
 //!         // Only use files named `*.rs` as test files.
 //!         .test_path_filter(|p| p.extension().and_then(|x| x.to_str()) == Some("rs"))
-//!         // Treat lines beginning with "#" as comments.
+//!         // Treat lines beginning with "#" inside a test as comments.
 //!         .comment_prefix("#")
 //!         // Extract the first sequence of commented line(s) as the tests.
 //!         .test_extract(|p| {
@@ -32,9 +30,9 @@
 //!                 .unwrap()
 //!                 .lines()
 //!                 // Skip non-commented lines at the start of the file.
-//!                 .skip_while(|l| !l.starts_with(COMMENT_PREFIX))
+//!                 .skip_while(|l| !l.starts_with("//"))
 //!                 // Extract consecutive commented lines.
-//!                 .take_while(|l| l.starts_with(COMMENT_PREFIX))
+//!                 .take_while(|l| l.starts_with("//"))
 //!                 .map(|l| &l[COMMENT_PREFIX.len()..])
 //!                 .collect::<Vec<_>>()
 //!                 .join("\n")
