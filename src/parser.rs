@@ -25,6 +25,12 @@ pub(crate) fn parse_tests<'a>(comment_prefix: Option<&str>, test_str: &'a str) -
         }
         let (test_name, val) = key_val(&lines, line_off, indent);
         if test_name == "ignore-if" {
+            if ignore_if.is_some() {
+                fatal(&format!(
+                    "'ignore-if' is specified more than once, line {}.",
+                    line_off
+                ))
+            }
             ignore_if = Some(val.into());
             line_off += 1;
             continue;
