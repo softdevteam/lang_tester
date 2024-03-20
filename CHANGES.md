@@ -1,3 +1,10 @@
+# lang_tester 0.8.1 (2024-03-20)
+
+* Use newer version of fm that provides more comprehensive output by default.
+
+* Document and enforce that `ignore-if` cmds are run in `CARGO_MANIFEST_DIR`.
+
+
 # lang_tester 0.8.0 (2024-01-31)
 
 ## Breaking change

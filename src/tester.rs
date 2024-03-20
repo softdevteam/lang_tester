@@ -568,7 +568,7 @@ pub(crate) struct Tests<'a> {
 
 /// If one or more parts of a `TestCmd` fail, the parts that fail are set to `Some(...)` in an
 /// instance of this struct.
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 struct TestFailure {
     status: Option<String>,
     stdin_remaining: usize,
@@ -932,27 +932,28 @@ fn run_tests(
                 .write_all(format!("\ntest lang_tests::{} ... ", test_fname).as_bytes())
                 .ok();
         }
-        if failure
-            != (TestFailure {
+        match failure {
+            TestFailure {
                 status: None,
                 stdin_remaining: 0,
                 stderr: None,
                 stderr_match: None,
                 stdout: None,
                 stdout_match: None,
-            })
-        {
-            let mut failures = failures.lock().unwrap();
-            failures.push((test_fname, failure));
-            handle
-                .set_color(ColorSpec::new().set_fg(Some(Color::Red)))
-                .ok();
-            handle.write_all(b"FAILED").ok();
-        } else {
-            handle
-                .set_color(ColorSpec::new().set_fg(Some(Color::Green)))
-                .ok();
-            handle.write_all(b"ok").ok();
+            } => {
+                handle
+                    .set_color(ColorSpec::new().set_fg(Some(Color::Green)))
+                    .ok();
+                handle.write_all(b"ok").ok();
+            }
+            _ => {
+                let mut failures = failures.lock().unwrap();
+                failures.push((test_fname, failure));
+                handle
+                    .set_color(ColorSpec::new().set_fg(Some(Color::Red)))
+                    .ok();
+                handle.write_all(b"FAILED").ok();
+            }
         }
         handle.reset().ok();
     }
