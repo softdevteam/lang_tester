@@ -489,9 +489,9 @@ impl LangTester {
                     }
                 }
             }
-            eprintln!("\nfailures:");
+            eprint!("failures:");
             for (test_fname, _) in failures {
-                eprint!("    lang_tests::{}", test_fname);
+                eprint!("\n    lang_tests::{}", test_fname);
             }
         }
 
