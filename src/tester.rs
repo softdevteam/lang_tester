@@ -439,7 +439,8 @@ impl LangTester {
             0
         };
 
-        let failures = Mutex::into_inner(Arc::try_unwrap(failures).unwrap()).unwrap();
+        let mut failures = Mutex::into_inner(Arc::try_unwrap(failures).unwrap()).unwrap();
+        failures.sort_by_key(|x| x.0.to_lowercase());
         self.pp_failures(
             &failures,
             max(test_files_len, failures.len()),
