@@ -2,7 +2,7 @@
 name = "lang_tester"
 description = "Concise language testing framework for compilers and VMs"
 repository = "https://github.com/softdevteam/lang_tester/"
-version = "0.8.1"
+version = "0.8.2"
 authors = ["Laurence Tratt <laurie@tratt.net>"]
 readme = "README.md"
 license = "Apache-2.0/MIT"
