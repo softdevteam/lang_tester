@@ -1,3 +1,8 @@
+# lang_tester 0.8.2 (2024-07-18)
+
+* Sort test failures by name rather than the previous arbitrary order.
+
+
 # lang_tester 0.8.1 (2024-03-20)
 
 * Use newer version of fm that provides more comprehensive output by default.
