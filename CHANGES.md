@@ -1,3 +1,12 @@
+# lang_tester 0.9.0 (2024-08-30)
+
+## Breaking change
+
+* Update the [fm](https://crates.io/crates/fm) dependency, which has breaking
+  changes, as well as [several new
+  features](https://github.com/softdevteam/fm/blob/master/CHANGES.md#fm-040-2024-08-30).
+
+
 # lang_tester 0.8.2 (2024-07-18)
 
 * Sort test failures by name rather than the previous arbitrary order.
