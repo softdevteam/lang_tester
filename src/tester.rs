@@ -545,7 +545,7 @@ pub(crate) struct TestCmd<'a> {
     pub rerun_if_stdout: Option<Vec<&'a str>>,
 }
 
-impl<'a> TestCmd<'a> {
+impl TestCmd<'_> {
     pub fn default() -> Self {
         Self {
             status: Status::Success,
